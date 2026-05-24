@@ -30,6 +30,7 @@ final class ProcessRunner {
         task.environment = env
 
         var capturedPipe: Pipe?
+        var outputHandle: FileHandle?
         if captureOutput {
             let pipe = Pipe()
             task.standardOutput = pipe
@@ -41,12 +42,14 @@ final class ProcessRunner {
             }
             let handle = try FileHandle(forWritingTo: logURL)
             try handle.seekToEnd()
+            outputHandle = handle
             task.standardOutput = handle
             task.standardError = handle
         }
 
         try task.run()
         task.waitUntilExit()
+        try? outputHandle?.close()
 
         if task.terminationStatus != 0 {
             let command = ([executable] + arguments).joined(separator: " ")

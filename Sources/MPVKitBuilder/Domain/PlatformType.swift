@@ -165,7 +165,11 @@ enum Xcrun {
     static func find(tool: String, sdk: String) -> String {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
-        task.arguments = ["--sdk", sdk.lowercased(), "--find", tool]
+        if tool.hasPrefix("--") {
+            task.arguments = ["--sdk", sdk.lowercased(), tool]
+        } else {
+            task.arguments = ["--sdk", sdk.lowercased(), "--find", tool]
+        }
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = Pipe()

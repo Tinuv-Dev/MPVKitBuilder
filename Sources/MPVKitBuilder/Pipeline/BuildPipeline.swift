@@ -79,9 +79,57 @@ extension BuildPipeline {
             return
         }
 
+        let runner = ProcessRunner(logger: logger)
+        let ctx = BuildContext(options: options, logger: logger, store: store, runner: runner)
+        BuildContext.current = ctx
+
         logger.section("Building")
-        // Real LibBuilders are wired up in M1+. For M0 we just print the plan and exit.
-        logger.write(.warn, "  LibBuilders are not implemented yet (M0 milestone). Re-run after M1 lands.")
+        var records: [ReportGenerator.SummaryRecord] = []
+
+        for (index, lib) in plan.toBuild.enumerated() {
+            let builder = try lib.makeBuilder(context: ctx)
+            if plan.forcedRebuild.contains(lib) {
+                try builder.cleanBuildProducts()
+            }
+
+            logger.libraryStart(name: lib.rawValue, version: lib.version, index: index + 1, total: plan.toBuild.count)
+            let started = Date()
+            do {
+                try builder.build()
+                try store.markFinished(
+                    lib,
+                    version: lib.version,
+                    inputHash: ResumePlanner.inputHash(for: lib, options: options)
+                )
+                logger.libraryFinished(name: lib.rawValue)
+                records.append(.init(library: lib, success: true, elapsed: Date().timeIntervalSince(started)))
+            } catch {
+                try? store.markFailed(
+                    lib,
+                    version: lib.version,
+                    inputHash: ResumePlanner.inputHash(for: lib, options: options),
+                    phase: builder.phase.rawValue,
+                    platform: builder.currentPlatform?.rawValue,
+                    arch: builder.currentArch?.rawValue,
+                    error: error
+                )
+                logger.libraryFailed(name: lib.rawValue, error: error)
+                records.append(.init(library: lib, success: false, elapsed: Date().timeIntervalSince(started)))
+                try? ReportGenerator.writeBuildSummary(
+                    records: records,
+                    distDirectory: options.distDirectory,
+                    to: options.reportDirectory.appendingPathComponent("build-summary.txt")
+                )
+                throw error
+            }
+        }
+
+        try ReportGenerator.writeBuildSummary(
+            records: records,
+            distDirectory: options.distDirectory,
+            to: options.reportDirectory.appendingPathComponent("build-summary.txt")
+        )
+        logger.write(.success, "  summary written to \(options.reportDirectory.appendingPathComponent("build-summary.txt").path)")
     }
 }
 

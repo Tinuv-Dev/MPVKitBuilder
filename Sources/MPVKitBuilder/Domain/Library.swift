@@ -79,6 +79,24 @@ extension Library {
         }
     }
 
+    var sourceReference: String {
+        switch self {
+        case .openssl:
+            return "openssl-\(version)"
+        default:
+            return version
+        }
+    }
+
+    var expectedFrameworks: [String] {
+        switch self {
+        case .openssl:
+            return ["Libssl", "Libcrypto"]
+        default:
+            return [rawValue]
+        }
+    }
+
     /// Whether this library is enabled by ffmpeg when present (used to auto-emit `--enable-libxxx`).
     var isFFmpegDependentLibrary: Bool {
         switch self {
@@ -88,6 +106,15 @@ extension Library {
             return true
         default:
             return false
+        }
+    }
+
+    func makeBuilder(context: BuildContext) throws -> Builder {
+        switch self {
+        case .openssl:
+            return LibOpenSSLBuilder(context: context)
+        default:
+            throw BuildError.unexpected("\(rawValue) builder is not implemented yet")
         }
     }
 }

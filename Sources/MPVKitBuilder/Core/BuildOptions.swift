@@ -22,6 +22,7 @@ struct BuildOptions {
     var stateFile: URL
 
     var platforms: [PlatformType] = PlatformType.defaultEnabled
+    var architectures: Set<ArchType> = []
     var enableGPL: Bool = true
     var enableDebug: Bool = false
     var enableSplitPlatform: Bool = false
@@ -103,6 +104,8 @@ extension BuildOptions {
                 }
                 return p
             }
+        case "arch", "architecture":
+            opt.architectures = Set(try parseArchitectureList(value))
         case "only":
             opt.only = Set(try parseLibraryList(value))
         case "skip":
@@ -134,6 +137,16 @@ extension BuildOptions {
                 throw BuildError.invalidArgument("unknown library '\(name)'")
             }
             return lib
+        }
+    }
+
+    static func parseArchitectureList(_ value: String) throws -> [ArchType] {
+        try value.split(separator: ",").map {
+            let name = String($0)
+            guard let arch = ArchType(rawValue: name) else {
+                throw BuildError.invalidArgument("unknown architecture '\(name)'")
+            }
+            return arch
         }
     }
 }

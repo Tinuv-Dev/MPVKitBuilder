@@ -17,6 +17,9 @@ enum ReportGenerator {
         lines.append("# MPVKitBuilder Dependency Graph")
         lines.append("# Generated: \(timestamp)")
         lines.append("# Platforms: \(platforms)")
+        if !options.architectures.isEmpty {
+            lines.append("# Architectures: \(options.architectures.map(\.rawValue).sorted().joined(separator: ", "))")
+        }
         lines.append("# GPL: \(gpl)  Debug: \(debug)")
         lines.append("")
 

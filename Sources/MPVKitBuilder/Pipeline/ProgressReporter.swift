@@ -4,6 +4,9 @@ enum ProgressReporter {
     static func printPlan(_ plan: BuildPlan, options: BuildOptions, logger: BuildLogger) {
         logger.section("Build Plan")
         logger.kv("Platforms", options.platforms.map(\.rawValue).joined(separator: ", "))
+        if !options.architectures.isEmpty {
+            logger.kv("Archs", options.architectures.map(\.rawValue).sorted().joined(separator: ", "))
+        }
         logger.kv("GPL", options.enableGPL ? "ON" : "OFF")
         logger.kv("Debug", options.enableDebug ? "ON" : "OFF")
         logger.kv("Resume", "\(plan.skipFinished.count) finished, \(plan.toBuild.count) to build, \(plan.skipExplicit.count) filtered")

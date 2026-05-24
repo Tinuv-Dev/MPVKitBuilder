@@ -32,7 +32,8 @@ enum ResumePlanner {
                 continue
             }
             if !forced.contains(lib),
-               store.isFinished(lib, currentInputHash: inputHash(for: lib, options: options)) {
+               store.isFinished(lib, currentInputHash: inputHash(for: lib, options: options)),
+               outputsExist(for: lib, options: options) {
                 skipFinished.append(lib)
                 continue
             }
@@ -71,10 +72,18 @@ enum ResumePlanner {
             "gpl=\(options.enableGPL)",
             "debug=\(options.enableDebug)",
             "platforms=\(options.platforms.map(\.rawValue).sorted().joined(separator: ","))",
+            "archs=\(options.architectures.map(\.rawValue).sorted().joined(separator: ","))",
         ]
         if lib == .ffmpeg || lib == .libmpv {
             parts.append("ffmpegExtra=\(options.ffmpegExtraArgs.joined(separator: " "))")
         }
         return parts.joined(separator: "|")
+    }
+
+    static func outputsExist(for lib: Library, options: BuildOptions) -> Bool {
+        lib.expectedFrameworks.allSatisfy { framework in
+            let url = options.distDirectory.appendingPathComponent("\(framework).xcframework")
+            return FileManager.default.fileExists(atPath: url.path)
+        }
     }
 }
