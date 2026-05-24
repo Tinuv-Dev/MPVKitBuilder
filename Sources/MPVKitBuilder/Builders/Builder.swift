@@ -147,6 +147,10 @@ class Builder {
         []
     }
 
+    func additionalPkgConfigDirectories(platform: PlatformType, arch: ArchType) -> [String] {
+        []
+    }
+
     func frameworkLibraryName(_ framework: String) -> String {
         if framework.hasPrefix("Lib") {
             return "lib" + framework.dropFirst(3).lowercased()
@@ -346,6 +350,7 @@ extension Builder {
     func pkgConfigDirectories(platform: PlatformType, arch: ArchType) -> [String] {
         // Walk transitive deps so pkg-config can recursively resolve Requires across the
         // whole graph (e.g. libass.pc → harfbuzz/freetype) without leaking into brew.
+        var directories = additionalPkgConfigDirectories(platform: platform, arch: arch)
         var ordered: [Library] = []
         var seen: Set<Library> = []
         var stack = dependencyLibraries()
@@ -354,12 +359,13 @@ extension Builder {
             ordered.append(next)
             stack.append(contentsOf: LibraryDependency.dependencies(of: next))
         }
-        return ordered.compactMap { dependency in
+        directories.append(contentsOf: ordered.compactMap { dependency in
             let dir = ctx.thinDir(dependency, platform: platform, arch: arch)
                 .appendingPathComponent("lib/pkgconfig")
             guard FileManager.default.fileExists(atPath: dir.path) else { return nil }
             return dir.path
-        }
+        })
+        return directories
     }
 
     func defaultPkgConfigPath() -> String? {

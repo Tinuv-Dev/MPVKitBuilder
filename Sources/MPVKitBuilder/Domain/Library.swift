@@ -106,6 +106,19 @@ extension Library {
         case .nettle:
             // nettle ships two libs: libnettle.a (symmetric crypto) and libhogweed.a (PK crypto).
             return ["nettle", "hogweed"]
+        case .vulkan:
+            return ["MoltenVK"]
+        case .libshaderc:
+            return ["Libshaderc_combined"]
+        case .ffmpeg:
+            return ["Libavcodec", "Libavdevice", "Libavfilter", "Libavformat",
+                    "Libavutil", "Libswresample", "Libswscale"]
+        case .libuchardet:
+            return ["Libuchardet"]
+        case .libluajit:
+            return ["Libluajit"]
+        case .libmpv:
+            return ["Libmpv"]
         default:
             return [rawValue]
         }
@@ -131,6 +144,7 @@ extension Library {
         case .libfribidi:    return LibFribidiBuilder(context: context)
         case .libharfbuzz:   return LibHarfbuzzBuilder(context: context)
         case .libass:        return LibAssBuilder(context: context)
+        case .libuchardet:   return LibUchardetBuilder(context: context)
         case .libbluray:     return LibBlurayBuilder(context: context)
         case .libsrt:        return LibSrtBuilder(context: context)
         case .libzvbi:       return LibZvbiBuilder(context: context)
@@ -144,7 +158,9 @@ extension Library {
         case .libplacebo:    return LibPlaceboBuilder(context: context)
         case .libdav1d:      return LibDav1dBuilder(context: context)
         case .libuavs3d:     return LibUavs3dBuilder(context: context)
+        case .libluajit:     return LibLuaJITBuilder(context: context)
         case .ffmpeg:        return LibFFmpegBuilder(context: context)
+        case .libmpv:        return LibMpvBuilder(context: context)
         default:
             throw BuildError.unexpected("\(rawValue) builder is not implemented yet")
         }
