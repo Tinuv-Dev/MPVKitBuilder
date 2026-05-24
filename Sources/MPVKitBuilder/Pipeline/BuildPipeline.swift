@@ -36,15 +36,26 @@ enum BuildPipeline {
             options: options,
             to: options.reportDirectory.appendingPathComponent("dependency-graph.txt")
         )
+
+        let runner = ProcessRunner(logger: logger, streamOutput: options.verboseOutput)
+        let ctx = BuildContext(options: options, logger: logger, store: store, runner: runner)
+        BuildContext.current = ctx
+
+        try ReportGenerator.writeFFmpegConfigure(
+            options: options,
+            context: ctx,
+            to: options.reportDirectory.appendingPathComponent("ffmpeg-configure.txt")
+        )
         logger.write(.info, "")
-        logger.write(.info, "  Report: \(options.reportDirectory.appendingPathComponent("dependency-graph.txt").path)")
+        logger.write(.info, "  dependency-graph : \(options.reportDirectory.appendingPathComponent("dependency-graph.txt").path)")
+        logger.write(.info, "  ffmpeg-configure : \(options.reportDirectory.appendingPathComponent("ffmpeg-configure.txt").path)")
 
         if options.command == .dryRun {
             logger.section("Dry run — no compilation will be performed")
             return
         }
 
-        try runBuild(plan: plan, options: options, store: store, logger: logger)
+        try runBuild(plan: plan, options: options, store: store, logger: logger, ctx: ctx)
     }
 }
 
@@ -69,19 +80,23 @@ extension BuildPipeline {
             options: options,
             to: options.reportDirectory.appendingPathComponent("dependency-graph.txt")
         )
+        let runner = ProcessRunner(logger: logger, streamOutput: options.verboseOutput)
+        let ctx = BuildContext(options: options, logger: logger, store: store, runner: runner)
+        BuildContext.current = ctx
+        try ReportGenerator.writeFFmpegConfigure(
+            options: options,
+            context: ctx,
+            to: options.reportDirectory.appendingPathComponent("ffmpeg-configure.txt")
+        )
         ProgressReporter.printPlan(plan, options: options, logger: logger)
-        logger.write(.success, "  report written to \(options.reportDirectory.path)")
+        logger.write(.success, "  reports written to \(options.reportDirectory.path)")
     }
 
-    static func runBuild(plan: BuildPlan, options: BuildOptions, store: BuildStateStore, logger: BuildLogger) throws {
+    static func runBuild(plan: BuildPlan, options: BuildOptions, store: BuildStateStore, logger: BuildLogger, ctx: BuildContext) throws {
         if plan.toBuild.isEmpty {
             logger.section("Nothing to build")
             return
         }
-
-        let runner = ProcessRunner(logger: logger, streamOutput: options.verboseOutput)
-        let ctx = BuildContext(options: options, logger: logger, store: store, runner: runner)
-        BuildContext.current = ctx
 
         logger.section("Building")
         var records: [ReportGenerator.SummaryRecord] = []

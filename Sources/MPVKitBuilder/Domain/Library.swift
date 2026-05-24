@@ -111,14 +111,23 @@ extension Library {
 
     func makeBuilder(context: BuildContext) throws -> Builder {
         switch self {
-        case .openssl:
-            return LibOpenSSLBuilder(context: context)
-        case .lcms2:
-            return LibLcms2Builder(context: context)
-        case .libdav1d:
-            return LibDav1dBuilder(context: context)
-        case .libsmbclient:
-            return LibSmbclientBuilder(context: context)
+        case .openssl:       return LibOpenSSLBuilder(context: context)
+        case .libunibreak:   return LibUnibreakBuilder(context: context)
+        case .libfreetype:   return LibFreetypeBuilder(context: context)
+        case .libfribidi:    return LibFribidiBuilder(context: context)
+        case .libharfbuzz:   return LibHarfbuzzBuilder(context: context)
+        case .libass:        return LibAssBuilder(context: context)
+        case .libbluray:     return LibBlurayBuilder(context: context)
+        case .libsrt:        return LibSrtBuilder(context: context)
+        case .libzvbi:       return LibZvbiBuilder(context: context)
+        case .libsmbclient:  return LibSmbclientBuilder(context: context)
+        case .vulkan:        return LibVulkanBuilder(context: context)
+        case .libshaderc:    return LibShadercBuilder(context: context)
+        case .lcms2:         return LibLcms2Builder(context: context)
+        case .libplacebo:    return LibPlaceboBuilder(context: context)
+        case .libdav1d:      return LibDav1dBuilder(context: context)
+        case .libuavs3d:     return LibUavs3dBuilder(context: context)
+        case .ffmpeg:        return LibFFmpegBuilder(context: context)
         default:
             throw BuildError.unexpected("\(rawValue) builder is not implemented yet")
         }

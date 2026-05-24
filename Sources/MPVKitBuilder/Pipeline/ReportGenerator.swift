@@ -54,6 +54,53 @@ enum ReportGenerator {
         try writeText(lines.joined(separator: "\n") + "\n", to: url)
     }
 
+    static func writeFFmpegConfigure(options: BuildOptions, context: BuildContext, to url: URL) throws {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let version = Library.ffmpeg.version
+
+        var lines: [String] = []
+        lines.append("# ffmpeg \(version)  --  configure command per (platform, arch)")
+        lines.append("# Generated: \(timestamp)")
+        lines.append("# Modify Config/FFmpegOptions.swift to change base or per-platform args.")
+        lines.append("# Use extra-ffmpeg=\"...\" on the CLI to append one-shot overrides.")
+        lines.append("")
+
+        let ffmpegDeps = LibraryDependency.dependencies(of: .ffmpeg)
+
+        for platform in options.platforms {
+            let archs = options.architectures.isEmpty
+                ? platform.architectures
+                : platform.architectures.filter { options.architectures.contains($0) }
+            for arch in archs {
+                lines.append("[\(platform.rawValue) / \(arch.rawValue)]")
+                let prefix = context.thinDir(.ffmpeg, platform: platform, arch: arch)
+                var args = ["--prefix=\(prefix.path)"]
+                args += FFmpegOptions.base
+                args += FFmpegOptions.platformExtra(platform, arch)
+                // Show expected dependency flags for planned build (runtime availability not known yet)
+                for dep in ffmpegDeps {
+                    if options.enableGPL || dep != .libsmbclient {
+                        args.append("--enable-\(dep.rawValue)")
+                    }
+                }
+                if options.enableGPL { args.append("--enable-gpl") }
+                if options.enableDebug {
+                    args.append("--enable-debug")
+                    args.append("--disable-stripping")
+                    args.append("--disable-optimizations")
+                }
+                if !options.ffmpegExtraArgs.isEmpty {
+                    args += options.ffmpegExtraArgs
+                }
+                let cmd = "./configure \\\n" + args.map { "    \($0)" }.joined(separator: " \\\n")
+                lines.append(cmd)
+                lines.append("")
+            }
+        }
+
+        try writeText(lines.joined(separator: "\n"), to: url)
+    }
+
     static func writeBuildSummary(records: [SummaryRecord], distDirectory: URL, to url: URL) throws {
         let timestamp = ISO8601DateFormatter().string(from: Date())
         var lines: [String] = []
