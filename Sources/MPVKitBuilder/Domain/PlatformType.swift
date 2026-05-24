@@ -96,9 +96,9 @@ extension PlatformType {
     func host(arch: ArchType) -> String {
         switch self {
         case .macos:
-            return "\(arch.targetCpu)-apple-darwin"
+            return "\(arch.cpuFamily)-apple-darwin"
         case .ios, .tvos, .xros:
-            return "\(arch.targetCpu)-\(rawValue)-darwin"
+            return "\(arch.cpuFamily)-\(rawValue)-darwin"
         case .isimulator, .maccatalyst:
             return PlatformType.ios.host(arch: arch)
         case .tvsimulator:

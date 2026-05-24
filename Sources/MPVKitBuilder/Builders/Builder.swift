@@ -73,13 +73,7 @@ class Builder {
 
         ctx.logger.phase("patch")
         for file in patchFiles {
-            try ctx.runner.launch(
-                executable: "/usr/bin/git",
-                arguments: ["apply", file.path],
-                currentDirectory: ctx.sourceDir(lib),
-                logTo: ctx.logFile(lib.rawValue)
-            )
-            ctx.logger.step("applied \(file.lastPathComponent)")
+            try applyPatchIfNeeded(file)
         }
     }
 
@@ -149,6 +143,10 @@ class Builder {
         lib.expectedFrameworks
     }
 
+    func dependencyLibraries() -> [Library] {
+        []
+    }
+
     func frameworkLibraryName(_ framework: String) -> String {
         if framework.hasPrefix("Lib") {
             return "lib" + framework.dropFirst(3).lowercased()
@@ -169,10 +167,11 @@ class Builder {
 
     func environment(platform: PlatformType, arch: ArchType) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        let cFlags = platform.cFlags(arch: arch)
-        let ldFlags = platform.ldFlags(arch: arch)
+        let cFlags = cFlags(platform: platform, arch: arch)
+        let ldFlags = ldFlags(platform: platform, arch: arch)
         let clang = platform.xcrunFind(tool: "clang")
         let clangxx = platform.xcrunFind(tool: "clang++")
+        let pkgConfig = toolPath("pkg-config")
 
         env["LC_CTYPE"] = "C"
         env["CC"] = clang.isEmpty ? "/usr/bin/clang" : clang
@@ -182,16 +181,41 @@ class Builder {
         env["CXXFLAGS"] = cFlags.joined(separator: " ")
         env["LDFLAGS"] = ldFlags.joined(separator: " ")
         env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + (env["PATH"] ?? "")
+        env["PKG_CONFIG"] = pkgConfig ?? "pkg-config"
+        env["PKG_CONFIG_PATH"] = pkgConfigPath(platform: platform, arch: arch)
+        env["PKG_CONFIG_LIBDIR"] = pkgConfigLibdir(platform: platform, arch: arch)
+        env["PKG_CONFIG_ALLOW_CROSS"] = "1"
 
         return env
     }
 
     func cFlags(platform: PlatformType, arch: ArchType) -> [String] {
-        platform.cFlags(arch: arch)
+        var flags = platform.cFlags(arch: arch)
+        for dependency in dependencyLibraries() {
+            let prefix = ctx.thinDir(dependency, platform: platform, arch: arch)
+            guard FileManager.default.fileExists(atPath: prefix.path) else { continue }
+            flags.append("-I\(prefix.appendingPathComponent("include").path)")
+            if dependency == .libsmbclient {
+                flags.append("-I\(prefix.appendingPathComponent("include/samba-4.0").path)")
+            }
+        }
+        return flags
     }
 
     func ldFlags(platform: PlatformType, arch: ArchType) -> [String] {
-        platform.ldFlags(arch: arch)
+        var flags = platform.ldFlags(arch: arch)
+        for dependency in dependencyLibraries() {
+            let prefix = ctx.thinDir(dependency, platform: platform, arch: arch)
+            guard FileManager.default.fileExists(atPath: prefix.path) else { continue }
+            flags.append("-L\(prefix.appendingPathComponent("lib").path)")
+            for name in linkLibraryNames(for: dependency) {
+                flags.append("-l\(name)")
+            }
+            if dependency == .libsmbclient {
+                flags.append(contentsOf: ["-lresolv", "-lpthread", "-lz", "-liconv"])
+            }
+        }
+        return flags
     }
 
     func sourceReference() -> String {
@@ -243,5 +267,107 @@ extension Builder {
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
         }
+    }
+
+    func applyPatchIfNeeded(_ file: URL) throws {
+        let source = ctx.sourceDir(lib)
+        let log = ctx.logFile(lib.rawValue)
+        if (try? ctx.runner.launch(
+            executable: "/usr/bin/git",
+            arguments: ["apply", "--check", file.path],
+            currentDirectory: source,
+            logTo: log
+        )) != nil {
+            try ctx.runner.launch(
+                executable: "/usr/bin/git",
+                arguments: ["apply", file.path],
+                currentDirectory: source,
+                logTo: log
+            )
+            ctx.logger.step("applied \(file.lastPathComponent)")
+            return
+        }
+
+        if (try? ctx.runner.launch(
+            executable: "/usr/bin/git",
+            arguments: ["apply", "--reverse", "--check", file.path],
+            currentDirectory: source,
+            logTo: log
+        )) != nil {
+            ctx.logger.step("already applied \(file.lastPathComponent)")
+            return
+        }
+
+        try ctx.runner.launch(
+            executable: "/usr/bin/git",
+            arguments: ["apply", "--check", file.path],
+            currentDirectory: source,
+            logTo: log
+        )
+    }
+
+    func requireTool(_ name: String, hint: String) throws -> String {
+        if let path = toolPath(name) {
+            return path
+        }
+        throw BuildError.missingTool(name: name, hint: hint)
+    }
+
+    func toolPath(_ name: String) -> String? {
+        let searchPaths = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
+        let candidates = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"] + searchPaths
+        for directory in candidates {
+            let path = URL(fileURLWithPath: directory).appendingPathComponent(name).path
+            if FileManager.default.isExecutableFile(atPath: path) {
+                return path
+            }
+        }
+        return nil
+    }
+
+    func pkgConfigPath(platform: PlatformType, arch: ArchType) -> String {
+        pkgConfigDirectories(platform: platform, arch: arch).joined(separator: ":")
+    }
+
+    func pkgConfigLibdir(platform: PlatformType, arch: ArchType) -> String {
+        var directories = pkgConfigDirectories(platform: platform, arch: arch)
+        if let defaults = defaultPkgConfigPath(), !defaults.isEmpty {
+            directories.append(defaults)
+        }
+        return directories.joined(separator: ":")
+    }
+
+    func pkgConfigDirectories(platform: PlatformType, arch: ArchType) -> [String] {
+        dependencyLibraries().compactMap { dependency in
+            let dir = ctx.thinDir(dependency, platform: platform, arch: arch)
+                .appendingPathComponent("lib/pkgconfig")
+            guard FileManager.default.fileExists(atPath: dir.path) else { return nil }
+            return dir.path
+        }
+    }
+
+    func defaultPkgConfigPath() -> String? {
+        guard let pkgConfig = toolPath("pkg-config") else { return nil }
+        return try? ctx.runner.launch(
+            executable: pkgConfig,
+            arguments: ["--variable", "pc_path", "pkg-config"],
+            captureOutput: true
+        )
+    }
+
+    func linkLibraryNames(for library: Library) -> [String] {
+        if library == .openssl {
+            return ["ssl", "crypto"]
+        }
+        if library.rawValue.hasPrefix("lib") {
+            return [String(library.rawValue.dropFirst(3))]
+        }
+        return [library.rawValue]
+    }
+
+    func mesonArray(_ values: [String]) -> String {
+        values.map { "'\($0.replacingOccurrences(of: "'", with: "\\'"))'" }.joined(separator: ", ")
     }
 }

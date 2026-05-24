@@ -16,7 +16,7 @@ enum ResumePlanner {
         }
 
         let forced = forcedSet(options: options, fullOrder: order)
-        let onlyFilter = options.only
+        let onlyFilter = expandedOnlyFilter(options.only)
 
         var toBuild: [Library] = []
         var skipFinished: [Library] = []
@@ -62,6 +62,19 @@ enum ResumePlanner {
             }
             return result
         }
+    }
+
+    static func expandedOnlyFilter(_ libraries: Set<Library>) -> Set<Library> {
+        guard !libraries.isEmpty else { return [] }
+        var result = libraries
+        var stack = Array(libraries)
+        while let next = stack.popLast() {
+            for dependency in LibraryDependency.dependencies(of: next) where !result.contains(dependency) {
+                result.insert(dependency)
+                stack.append(dependency)
+            }
+        }
+        return result
     }
 
     /// Hash of inputs that affect a library's output. If the hash changes, the cached

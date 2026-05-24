@@ -30,7 +30,49 @@ class AutoconfBuilder: Builder {
         ["install"]
     }
 
-    func prepareConfigure(platform: PlatformType, arch: ArchType, buildDirectory: URL, environment: [String: String]) throws {}
+    func prepareConfigure(platform: PlatformType, arch: ArchType, buildDirectory: URL, environment: [String: String]) throws {
+        let configure = ctx.sourceDir(lib).appendingPathComponent("configure")
+        if FileManager.default.fileExists(atPath: configure.path) {
+            return
+        }
+
+        let source = ctx.sourceDir(lib)
+        let autogen = source.appendingPathComponent("autogen.sh")
+        let bootstrap = source.appendingPathComponent("bootstrap")
+        let dotBootstrap = source.appendingPathComponent(".bootstrap")
+
+        if FileManager.default.fileExists(atPath: autogen.path) {
+            var env = environment
+            env["NOCONFIGURE"] = "1"
+            try ctx.runner.launch(
+                executable: "/bin/sh",
+                arguments: [autogen.path],
+                currentDirectory: source,
+                environment: env,
+                logTo: ctx.logFile(lib.rawValue)
+            )
+        } else if FileManager.default.fileExists(atPath: bootstrap.path) {
+            try ctx.runner.launch(
+                executable: bootstrap.path,
+                arguments: [],
+                currentDirectory: source,
+                environment: environment,
+                logTo: ctx.logFile(lib.rawValue)
+            )
+        } else if FileManager.default.fileExists(atPath: dotBootstrap.path) {
+            try ctx.runner.launch(
+                executable: dotBootstrap.path,
+                arguments: [],
+                currentDirectory: source,
+                environment: environment,
+                logTo: ctx.logFile(lib.rawValue)
+            )
+        }
+
+        if !FileManager.default.fileExists(atPath: configure.path) {
+            throw BuildError.unexpected("missing configure script: \(configure.path)")
+        }
+    }
 
     override func doCompile(platform: PlatformType, arch: ArchType, buildDirectory: URL) throws {
         let env = environment(platform: platform, arch: arch)

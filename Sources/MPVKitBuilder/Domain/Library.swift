@@ -113,6 +113,12 @@ extension Library {
         switch self {
         case .openssl:
             return LibOpenSSLBuilder(context: context)
+        case .lcms2:
+            return LibLcms2Builder(context: context)
+        case .libdav1d:
+            return LibDav1dBuilder(context: context)
+        case .libsmbclient:
+            return LibSmbclientBuilder(context: context)
         default:
             throw BuildError.unexpected("\(rawValue) builder is not implemented yet")
         }

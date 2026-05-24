@@ -32,6 +32,7 @@ struct BuildOptions {
     var skip: Set<Library> = []
     var ffmpegExtraArgs: [String] = []
     var generatePackage: Bool = true
+    var verboseOutput: Bool = false
 }
 
 extension BuildOptions {
@@ -87,6 +88,7 @@ extension BuildOptions {
         case "disable-debug":          opt.enableDebug = false
         case "enable-split-platform":  opt.enableSplitPlatform = true
         case "disable-package":        opt.generatePackage = false
+        case "--verbose", "verbose":    opt.verboseOutput = true
         case "dry-run":                opt.command = .dryRun
         default:
             // ignore unknown flag-like tokens silently (make passes its own MAKEFLAGS)

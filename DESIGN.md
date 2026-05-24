@@ -727,7 +727,7 @@ Xcode：Command Line Tools + 全部 SDK（iOS / tvOS / visionOS）。
 
 - [x] **M0** 脚手架：SwiftPM init、目录骨架、Core/Domain/Pipeline 核心类型、`swift run MPVKitBuilder dry-run` 打印依赖图与计划
 - [x] **M1** 单库打通：`Builder` 基类 + `AutoconfBuilder` + `LibOpenSSLBuilder`，macOS arm64 单平台产出 `Libssl.xcframework / Libcrypto.xcframework`；验证 `state.json` 与断点续编
-- [ ] **M2** 三种构建系统策略：`CMakeBuilder / MesonBuilder / WafBuilder`；分别用 `lcms2 / libdav1d / libsmbclient` 单测
+- [x] **M2** 三种构建系统策略：`CMakeBuilder / MesonBuilder / WafBuilder`；分别用 `lcms2 / libdav1d / libsmbclient` 单测
 - [ ] **M3** FFmpeg 主链路：`LibFFmpegBuilder + FFmpegOptions`，`ffmpeg-configure.txt` 落盘并可被 `extra-ffmpeg=` 改写
 - [ ] **M4** libmpv：`LibMpvBuilder`（meson）+ libluajit / libuchardet / libbluray 依赖打通
 - [ ] **M5** 全平台扩展：ios / isimulator / tvos / tvsimulator / maccatalyst / xros / xrsimulator

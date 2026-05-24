@@ -79,7 +79,7 @@ extension BuildPipeline {
             return
         }
 
-        let runner = ProcessRunner(logger: logger)
+        let runner = ProcessRunner(logger: logger, streamOutput: options.verboseOutput)
         let ctx = BuildContext(options: options, logger: logger, store: store, runner: runner)
         BuildContext.current = ctx
 

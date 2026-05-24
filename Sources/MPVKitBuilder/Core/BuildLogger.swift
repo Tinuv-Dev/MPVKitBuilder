@@ -97,7 +97,9 @@ extension BuildLogger {
 extension BuildLogger {
     func write(_ level: Level, _ line: String) {
         if level.rawValue >= consoleLevel.rawValue {
-            print(line)
+            if let data = (line + "\n").data(using: .utf8) {
+                FileHandle.standardOutput.write(data)
+            }
         }
         if let url = logFileURL {
             let stamped = "[\(ISO8601DateFormatter().string(from: Date()))] " + line + "\n"

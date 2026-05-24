@@ -2,9 +2,11 @@ import Foundation
 
 final class ProcessRunner {
     let logger: BuildLogger
+    let streamOutput: Bool
 
-    init(logger: BuildLogger) {
+    init(logger: BuildLogger, streamOutput: Bool = false) {
         self.logger = logger
+        self.streamOutput = streamOutput
     }
 
     @discardableResult
@@ -31,6 +33,7 @@ final class ProcessRunner {
 
         var capturedPipe: Pipe?
         var outputHandle: FileHandle?
+        var streamPipe: Pipe?
         if captureOutput {
             let pipe = Pipe()
             task.standardOutput = pipe
@@ -43,12 +46,33 @@ final class ProcessRunner {
             let handle = try FileHandle(forWritingTo: logURL)
             try handle.seekToEnd()
             outputHandle = handle
-            task.standardOutput = handle
-            task.standardError = handle
+            if streamOutput {
+                let pipe = Pipe()
+                streamPipe = pipe
+                task.standardOutput = pipe
+                task.standardError = pipe
+                pipe.fileHandleForReading.readabilityHandler = { stream in
+                    let data = stream.availableData
+                    guard !data.isEmpty else { return }
+                    try? handle.write(contentsOf: data)
+                    FileHandle.standardOutput.write(data)
+                }
+            } else {
+                task.standardOutput = handle
+                task.standardError = handle
+            }
         }
 
         try task.run()
         task.waitUntilExit()
+        streamPipe?.fileHandleForReading.readabilityHandler = nil
+        if let pipe = streamPipe {
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if !data.isEmpty {
+                try? outputHandle?.write(contentsOf: data)
+                FileHandle.standardOutput.write(data)
+            }
+        }
         try? outputHandle?.close()
 
         if task.terminationStatus != 0 {
