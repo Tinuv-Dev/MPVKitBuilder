@@ -26,8 +26,9 @@ enum FFmpegOptions {
         // Core libraries
         "--enable-avcodec", "--enable-avformat", "--enable-avutil",
         "--enable-network", "--enable-swresample", "--enable-swscale",
-        // Disable device layers / postproc; selectively re-enable below
-        "--disable-devices", "--disable-outdevs", "--disable-indevs", "--disable-postproc",
+        // Disable device layers; selectively re-enable below.
+        // (libpostproc was removed in FFmpeg 8.x, so --disable-postproc is no longer accepted.)
+        "--disable-devices", "--disable-outdevs", "--disable-indevs",
         "--enable-indev=lavfi",
         // Non-Apple hardware accel off
         "--disable-d3d11va", "--disable-dxva2", "--disable-vaapi", "--disable-vdpau",

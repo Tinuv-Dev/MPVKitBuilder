@@ -513,6 +513,8 @@ enum FFmpegOptions {
 
 由 `LibraryDependency.swift` 集中声明：
 
+> 独立核验记录见 `DEPENDENCY_GRAPH_VERIFICATION.md`。当前依赖图应理解为“本项目选定顶层库的构建顺序图”，不是上游完整依赖闭包；其中部分边是启用特定 feature 后的条件依赖，系统库、构建工具、Cargo 依赖、MoltenVK fetchDependencies、shaderc third_party 依赖等不在图内。
+
 ```swift
 enum LibraryDependency {
     static let edges: [Library: [Library]] = [
@@ -728,7 +730,7 @@ Xcode：Command Line Tools + 全部 SDK（iOS / tvOS / visionOS）。
 - [x] **M0** 脚手架：SwiftPM init、目录骨架、Core/Domain/Pipeline 核心类型、`swift run MPVKitBuilder dry-run` 打印依赖图与计划
 - [x] **M1** 单库打通：`Builder` 基类 + `AutoconfBuilder` + `LibOpenSSLBuilder`，macOS arm64 单平台产出 `Libssl.xcframework / Libcrypto.xcframework`；验证 `state.json` 与断点续编
 - [x] **M2** 三种构建系统策略：`CMakeBuilder / MesonBuilder / WafBuilder`；分别用 `lcms2 / libdav1d / libsmbclient` 单测
-- [ ] **M3** FFmpeg 主链路：`LibFFmpegBuilder + FFmpegOptions`，`ffmpeg-configure.txt` 落盘并可被 `extra-ffmpeg=` 改写
+- [x] **M3** FFmpeg 主链路：`LibFFmpegBuilder + FFmpegOptions`，`ffmpeg-configure.txt` 落盘并可被 `extra-ffmpeg=` 改写
 - [ ] **M4** libmpv：`LibMpvBuilder`（meson）+ libluajit / libuchardet / libbluray 依赖打通
 - [ ] **M5** 全平台扩展：ios / isimulator / tvos / tvsimulator / maccatalyst / xros / xrsimulator
 - [ ] **M6** 可选库：`libdovi`（Rust + cargo-c），平台不支持时优雅 `platformNotSupported`

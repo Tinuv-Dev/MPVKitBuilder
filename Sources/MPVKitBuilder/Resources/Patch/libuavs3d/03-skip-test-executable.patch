@@ -1,0 +1,27 @@
+--- a/CMakeLists.txt	2026-05-25 01:13:32
++++ b/CMakeLists.txt	2026-05-25 01:13:32
+@@ -7,14 +7,16 @@
+ set(CMAKE_C_STANDARD 99)
+ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+ 
+-aux_source_directory(./test DIR_SRC_TEST)
+-
+ add_subdirectory(./source)
+ 
+-add_executable(uavs3dec ${DIR_SRC_TEST})
+-
+-if (NOT MSVC)
+-    target_link_libraries(uavs3dec m)
++# Skip the bundled test executable.
++# test/utest.c renames main to uavs3d_decode_sample on Apple ARM64,
++# which would leave the uavs3dec target with an unresolved _main symbol.
++if(NOT (APPLE AND CMAKE_OSX_ARCHITECTURES MATCHES "arm64"))
++    aux_source_directory(./test DIR_SRC_TEST)
++    add_executable(uavs3dec ${DIR_SRC_TEST})
++    if (NOT MSVC)
++        target_link_libraries(uavs3dec m)
++    endif()
++    target_link_libraries(uavs3dec uavs3d)
+ endif()
+-target_link_libraries(uavs3dec uavs3d)
+-#target_link_libraries(uavs3dec dl)

@@ -50,6 +50,9 @@ extension PlatformType {
         }
     }
 
+    /// All architectures the platform *can* host. CLI `arch=` selects from this set;
+    /// when no `arch=` is given we narrow to `defaultArchitectures` instead, so
+    /// x86_64 stays opt-in (Apple Silicon is the de-facto default everywhere now).
     var architectures: [ArchType] {
         switch self {
         case .ios, .xros:                       return [.arm64]
@@ -64,6 +67,12 @@ extension PlatformType {
             #endif
         case .maccatalyst:                      return [.arm64, .x86_64]
         }
+    }
+
+    /// Architectures used when the user did not pass `arch=` on the CLI.
+    /// x86_64 is supported but no longer built by default.
+    var defaultArchitectures: [ArchType] {
+        architectures.filter { $0 != .x86_64 }
     }
 
     var sdk: String {

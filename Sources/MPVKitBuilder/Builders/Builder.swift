@@ -134,7 +134,7 @@ class Builder {
 
     func architectures(for platform: PlatformType) -> [ArchType] {
         guard !ctx.options.architectures.isEmpty else {
-            return platform.architectures
+            return platform.defaultArchitectures
         }
         return platform.architectures.filter { ctx.options.architectures.contains($0) }
     }
@@ -213,6 +213,10 @@ class Builder {
             }
             if dependency == .libsmbclient {
                 flags.append(contentsOf: ["-lresolv", "-lpthread", "-lz", "-liconv"])
+            }
+            if dependency == .libgnutls {
+                // gnutls calls into Security/CoreFoundation for trust store + keychain.
+                flags.append(contentsOf: ["-framework", "Security", "-framework", "CoreFoundation"])
             }
         }
         return flags
@@ -340,7 +344,17 @@ extension Builder {
     }
 
     func pkgConfigDirectories(platform: PlatformType, arch: ArchType) -> [String] {
-        dependencyLibraries().compactMap { dependency in
+        // Walk transitive deps so pkg-config can recursively resolve Requires across the
+        // whole graph (e.g. libass.pc → harfbuzz/freetype) without leaking into brew.
+        var ordered: [Library] = []
+        var seen: Set<Library> = []
+        var stack = dependencyLibraries()
+        while let next = stack.popLast() {
+            if !seen.insert(next).inserted { continue }
+            ordered.append(next)
+            stack.append(contentsOf: LibraryDependency.dependencies(of: next))
+        }
+        return ordered.compactMap { dependency in
             let dir = ctx.thinDir(dependency, platform: platform, arch: arch)
                 .appendingPathComponent("lib/pkgconfig")
             guard FileManager.default.fileExists(atPath: dir.path) else { return nil }
@@ -360,6 +374,9 @@ extension Builder {
     func linkLibraryNames(for library: Library) -> [String] {
         if library == .openssl {
             return ["ssl", "crypto"]
+        }
+        if library == .nettle {
+            return ["nettle", "hogweed"]
         }
         if library.rawValue.hasPrefix("lib") {
             return [String(library.rawValue.dropFirst(3))]

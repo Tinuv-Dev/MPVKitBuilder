@@ -8,6 +8,7 @@ final class LibFreetypeBuilder: MesonBuilder {
     override func mesonExtraSetupArguments(platform: PlatformType, arch: ArchType, buildDirectory: URL) throws -> [String] {
         [
             "-Dbrotli=disabled",
+            "-Dbzip2=disabled",
             "-Dharfbuzz=disabled",
             "-Dpng=disabled",
             "-Dzlib=disabled",

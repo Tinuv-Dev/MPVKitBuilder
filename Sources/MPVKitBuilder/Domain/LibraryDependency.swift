@@ -12,7 +12,10 @@ enum LibraryDependency {
         .libbluray:    [.libfreetype],
         .libsrt:       [.openssl],
         .libzvbi:      [],
-        .libsmbclient: [.openssl],
+        .gmp:          [],
+        .nettle:       [.gmp],
+        .libgnutls:    [.gmp, .nettle],
+        .libsmbclient: [.openssl, .libgnutls],
         .vulkan:       [],
         .libshaderc:   [],
         .lcms2:        [],
@@ -28,6 +31,19 @@ enum LibraryDependency {
 
     static func dependencies(of library: Library) -> [Library] {
         edges[library] ?? []
+    }
+
+    /// Transitive dependencies of `library` (not including `library` itself), deduplicated.
+    static func transitiveDependencies(of library: Library) -> [Library] {
+        var result: [Library] = []
+        var seen: Set<Library> = []
+        var stack = dependencies(of: library)
+        while let next = stack.popLast() {
+            if !seen.insert(next).inserted { continue }
+            result.append(next)
+            stack.append(contentsOf: dependencies(of: next))
+        }
+        return result
     }
 }
 

@@ -69,7 +69,7 @@ enum ReportGenerator {
 
         for platform in options.platforms {
             let archs = options.architectures.isEmpty
-                ? platform.architectures
+                ? platform.defaultArchitectures
                 : platform.architectures.filter { options.architectures.contains($0) }
             for arch in archs {
                 lines.append("[\(platform.rawValue) / \(arch.rawValue)]")

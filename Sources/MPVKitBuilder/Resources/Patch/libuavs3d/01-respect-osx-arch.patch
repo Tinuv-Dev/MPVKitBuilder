@@ -1,0 +1,20 @@
+--- a/source/CMakeLists.txt
++++ b/source/CMakeLists.txt
+@@ -1,6 +1,17 @@
+ set(LIBNAME uavs3d)
+
+ # check cpu
++# When CMAKE_OSX_ARCHITECTURES is set (cross-compile on Apple), it overrides
++# the host's CMAKE_SYSTEM_PROCESSOR for picking the target CPU branch — otherwise
++# building x86_64 on Apple Silicon picks the arm64 sources and produces broken
++# slices.
++if(APPLE AND CMAKE_OSX_ARCHITECTURES)
++  if("${CMAKE_OSX_ARCHITECTURES}" MATCHES "arm64")
++    set(CMAKE_SYSTEM_PROCESSOR "arm64")
++  elseif("${CMAKE_OSX_ARCHITECTURES}" MATCHES "x86_64")
++    set(CMAKE_SYSTEM_PROCESSOR "x86_64")
++  endif()
++endif()
+ if("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "AMD64" OR
+    "${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "x86_64")
+   if(${CMAKE_SIZEOF_VOID_P} EQUAL 4)

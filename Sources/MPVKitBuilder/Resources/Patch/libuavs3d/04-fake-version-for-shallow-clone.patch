@@ -1,0 +1,15 @@
+--- a/version.sh	2026-05-25 01:13:58
++++ b/version.sh	2026-05-25 01:13:58
+@@ -15,9 +15,9 @@
+     shell_dir=$1
+ fi
+ 
+-VER_R=`git rev-list origin/master | sort | wc -l | awk '{print $1}'`
+-VER_L=`git rev-list HEAD | sort | wc -l | awk '{print $1}'`
+-VER_SHA1=`git log -n 1 | head -n 1 | cut -d ' ' -f 2`
++VER_R=100
++VER_L=100
++VER_SHA1=`git rev-parse HEAD 2>/dev/null || echo unknown`
+ 
+ major_version="1"
+ minor_version="2"

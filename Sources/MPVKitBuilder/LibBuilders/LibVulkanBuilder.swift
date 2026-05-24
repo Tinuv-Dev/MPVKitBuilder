@@ -47,7 +47,7 @@ final class LibVulkanBuilder: Builder {
         }
 
         for platform in targetPlatforms {
-            for arch in platform.architectures {
+            for arch in architectures(for: platform) {
                 try createPkgConfig(platform: platform, arch: arch)
             }
         }

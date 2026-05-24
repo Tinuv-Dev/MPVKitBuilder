@@ -6,7 +6,16 @@ final class LibSmbclientBuilder: WafBuilder {
     }
 
     override func dependencyLibraries() -> [Library] {
-        [.openssl]
+        // samba waf will pkg-config gnutls at configure time; gmp + nettle come along via
+        // pkgConfigDirectories' transitive walk.
+        [.openssl, .libgnutls]
+    }
+
+    // Samba cross-compilation is extremely fragile; only build for the native host arch.
+    // On arm64 Mac this gives arm64-only smbclient; ffmpeg x86_64 slice will silently
+    // skip --enable-libsmbclient (depIsAvailable returns false when thinDir is absent).
+    override func architectures(for platform: PlatformType) -> [ArchType] {
+        super.architectures(for: platform).filter { $0.executable }
     }
 
     override func preCompile() throws {
@@ -152,11 +161,24 @@ extension LibSmbclientBuilder {
 
     func writeCrossAnswers(platform: PlatformType, arch: ArchType) throws -> URL {
         let url = ctx.sourceDir(lib).appendingPathComponent("cross-answers.txt")
+        // Values must NOT be quoted — samba waf's parser takes the raw string after ':'
         let content = """
-        Checking uname sysname type: "Darwin"
-        Checking uname machine type: "\(arch.targetCpu)"
-        Checking uname release type: "23.0.0"
-        Checking uname version type: "Darwin Kernel Version"
+        Checking uname sysname type: Darwin
+        Checking uname machine type: \(arch.targetCpu)
+        Checking uname release type: 23.0.0
+        Checking uname version type: Darwin Kernel Version
+        Checking simple C program: yes
+        Checking for header stdio.h: yes
+        Checking for header stdbool.h: yes
+        Checking for header stdlib.h: yes
+        Checking for header unistd.h: yes
+        Checking for header sys/types.h: yes
+        Checking for header sys/stat.h: yes
+        Checking for large file support: yes
+        Checking for kernel change notify support: no
+        Checking for kernel oplocks: no
+        rpath library support: yes
+        -Wl,--version-script support: no
         """
         try content.write(to: url, atomically: true, encoding: .utf8)
         return url

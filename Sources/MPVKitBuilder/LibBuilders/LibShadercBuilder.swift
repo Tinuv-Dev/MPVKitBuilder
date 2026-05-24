@@ -51,6 +51,17 @@ final class LibShadercBuilder: CMakeBuilder {
         if FileManager.default.fileExists(atPath: combined.path) {
             try? FileManager.default.moveItem(at: combined, to: shared)
         }
+
+        // shaderc_combined is a C++ static lib; downstream static linkers (FFmpeg + libplacebo)
+        // must pull in libc++ explicitly, otherwise std::* symbols are undefined.
+        if var content = try? String(contentsOf: shared, encoding: .utf8),
+           !content.contains("-lc++") {
+            content = content.replacingOccurrences(
+                of: "-lshaderc_combined",
+                with: "-lshaderc_combined -lc++"
+            )
+            try? content.write(to: shared, atomically: true, encoding: .utf8)
+        }
     }
 }
 

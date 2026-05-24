@@ -74,6 +74,8 @@ class AutoconfBuilder: Builder {
         }
     }
 
+    func postConfigure(platform: PlatformType, arch: ArchType, buildDirectory: URL) throws {}
+
     override func doCompile(platform: PlatformType, arch: ArchType, buildDirectory: URL) throws {
         let env = environment(platform: platform, arch: arch)
         try prepareConfigure(platform: platform, arch: arch, buildDirectory: buildDirectory, environment: env)
@@ -85,6 +87,8 @@ class AutoconfBuilder: Builder {
             environment: env,
             logTo: ctx.logFile(lib.rawValue)
         )
+
+        try postConfigure(platform: platform, arch: arch, buildDirectory: buildDirectory)
 
         let workDir = buildWorkingDirectory(platform: platform, arch: arch, buildDirectory: buildDirectory)
         try ctx.runner.launch(
