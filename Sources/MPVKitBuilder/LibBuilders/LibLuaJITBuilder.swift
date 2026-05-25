@@ -9,18 +9,20 @@ final class LibLuaJITBuilder: Builder {
         let make = try requireTool("make", hint: "Install command line tools or GNU make")
         let source = ctx.sourceDir(lib).appendingPathComponent("src")
         let env = luaJITEnvironment(platform: platform, arch: arch)
-        let buildArgs = luaJITMakeArguments(platform: platform, arch: arch)
+        let makeArgs = luaJITMakeArguments(platform: platform, arch: arch)
 
+        // LuaJIT evaluates target settings before running clean, so clean needs
+        // the same target variables as the real build.
         try ctx.runner.launch(
             executable: make,
-            arguments: ["clean"],
+            arguments: ["clean"] + makeArgs,
             currentDirectory: source,
             environment: env,
             logTo: ctx.logFile(lib.rawValue)
         )
         try ctx.runner.launch(
             executable: make,
-            arguments: ["-j\(ProcessInfo.processInfo.activeProcessorCount)"] + buildArgs,
+            arguments: ["-j\(ProcessInfo.processInfo.activeProcessorCount)"] + makeArgs,
             currentDirectory: source,
             environment: env,
             logTo: ctx.logFile(lib.rawValue)
@@ -34,11 +36,10 @@ final class LibLuaJITBuilder: Builder {
 extension LibLuaJITBuilder {
     func luaJITEnvironment(platform: PlatformType, arch: ArchType) -> [String: String] {
         var env = environment(platform: platform, arch: arch)
-        if platform == .macos {
-            env["MACOSX_DEPLOYMENT_TARGET"] = platform.minVersion
-        } else {
-            env["IPHONEOS_DEPLOYMENT_TARGET"] = platform.minVersion
-        }
+        env.removeValue(forKey: "IPHONEOS_DEPLOYMENT_TARGET")
+        env.removeValue(forKey: "TVOS_DEPLOYMENT_TARGET")
+        env.removeValue(forKey: "XROS_DEPLOYMENT_TARGET")
+        env["MACOSX_DEPLOYMENT_TARGET"] = platform == .macos ? platform.minVersion : PlatformType.macos.minVersion
         return env
     }
 
@@ -53,6 +54,8 @@ extension LibLuaJITBuilder {
         return [
             "PREFIX=\(prefix.path)",
             "BUILDMODE=static",
+            "CFLAGS=",
+            "LDFLAGS=",
             "HOST_CC=/usr/bin/clang",
             "CC=\(clang)",
             "TARGET_CC=\(clang)",
