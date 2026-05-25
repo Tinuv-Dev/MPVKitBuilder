@@ -43,17 +43,18 @@ jobs:
         with:
           xcode-version: '16.2'
 
+      - name: Free disk
+        run: |
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes || true
+          sudo rm -rf "$HOME/Library/Developer/CoreSimulator/Caches" || true
+          df -h
+
       - name: Download platforms
         run: |
           sudo xcodebuild -runFirstLaunch
           xcodebuild -downloadPlatform iOS
           xcodebuild -downloadPlatform tvOS
           xcodebuild -downloadPlatform visionOS
-
-      - name: Free disk
-        run: |
-          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes || true
-          sudo rm -rf "$HOME/Library/Developer/CoreSimulator/Caches" || true
           df -h
 
       - name: Install build tools

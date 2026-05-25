@@ -1,0 +1,97 @@
+name: Diagnose Env
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    name: inspect macos-15 runner
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Pin Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.2'
+
+      - name: Xcode selection
+        run: |
+          echo "== xcode-select -p =="
+          xcode-select -p
+          echo
+          echo "== xcodebuild -version =="
+          xcodebuild -version
+          echo
+          echo "== DEVELOPER_DIR =="
+          echo "${DEVELOPER_DIR:-<unset>}"
+
+      - name: Installed Xcodes
+        run: |
+          echo "== /Applications/Xcode*.app =="
+          ls -ld /Applications/Xcode*.app || true
+
+      - name: Show SDKs
+        run: |
+          echo "== xcodebuild -showsdks =="
+          xcodebuild -showsdks || true
+
+      - name: Bundled platforms inside selected Xcode
+        run: |
+          DEV=$(xcode-select -p)
+          echo "== $DEV/Platforms =="
+          ls "$DEV/Platforms" || true
+          echo
+          for p in iPhoneOS iPhoneSimulator AppleTVOS AppleTVSimulator XROS XRSimulator; do
+            DIR="$DEV/Platforms/${p}.platform/Developer/SDKs"
+            echo "-- $DIR --"
+            ls "$DIR" 2>/dev/null || echo "(missing)"
+          done
+
+      - name: CoreSimulator runtimes (pre-installed)
+        run: |
+          echo "== /Library/Developer/CoreSimulator/Profiles/Runtimes =="
+          ls -lh /Library/Developer/CoreSimulator/Profiles/Runtimes 2>/dev/null || echo "(missing)"
+          echo
+          echo "== /Library/Developer/CoreSimulator/Volumes =="
+          ls -lh /Library/Developer/CoreSimulator/Volumes 2>/dev/null || echo "(missing)"
+          echo
+          echo "== xcrun simctl list runtimes =="
+          xcrun simctl list runtimes || true
+
+      - name: Destinations for MoltenVK schemes (pre-cleanup)
+        run: |
+          # Try to enumerate destinations Xcode actually recognises for the
+          # iOS/tvOS/visionOS schemes that the prebuild workflow drives. If iOS
+          # is missing here, we know the platform isn't visible BEFORE any
+          # Free disk step touches things.
+          for sdk in iOS tvOS visionOS; do
+            echo "============================="
+            echo "== showdestinations sdk=$sdk =="
+            echo "============================="
+            xcodebuild -showdestinations -scheme "MPVKitBuilder" -workspace . 2>/dev/null || true
+            # The MoltenVK project isn't checked out here; we just need to know
+            # whether xcodebuild itself can resolve a generic destination.
+            xcrun --sdk $(echo $sdk | tr '[:upper:]' '[:lower:]')os --show-sdk-path 2>&1 || true
+            xcrun --sdk $(echo $sdk | tr '[:upper:]' '[:lower:]')simulator --show-sdk-path 2>&1 || true
+          done
+
+      - name: Disk usage
+        run: |
+          df -h
+          echo
+          echo "== top space consumers under /Library/Developer =="
+          sudo du -sh /Library/Developer/* 2>/dev/null | sort -h || true
+          echo
+          echo "== top space consumers under /Applications/Xcode*.app =="
+          sudo du -sh /Applications/Xcode*.app 2>/dev/null || true
+
+      - name: Simulate Free disk effect (dry-run)
+        run: |
+          # Show what the existing Free disk step would delete, without
+          # actually deleting it. Useful to confirm that we'd be nuking
+          # legitimately-needed runtimes.
+          echo "== would rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes =="
+          ls -lh /Library/Developer/CoreSimulator/Profiles/Runtimes 2>/dev/null || echo "(already missing)"
+          echo
+          echo "== would rm -rf \$HOME/Library/Developer/CoreSimulator/Caches =="
+          ls -lh "$HOME/Library/Developer/CoreSimulator/Caches" 2>/dev/null || echo "(already missing)"
