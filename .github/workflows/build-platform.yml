@@ -91,6 +91,7 @@ jobs:
             platform=${{ inputs.platform }}
             split-platform
             clean-after-lib
+            verbose
             prebuilt-vulkan=$PREBUILT_VULKAN
           )
           if [ "${{ inputs.enable_gpl }}" = "true" ]; then

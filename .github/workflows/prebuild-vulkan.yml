@@ -36,7 +36,8 @@ jobs:
         run: |
           swift run --package-path . MPVKitBuilder build \
             only=vulkan \
-            platform=${{ inputs.platforms }}
+            platform=${{ inputs.platforms }} \
+            verbose
 
       - name: Stage prebuilt bundle
         run: |
