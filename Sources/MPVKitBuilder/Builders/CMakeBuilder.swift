@@ -14,7 +14,7 @@ class CMakeBuilder: Builder {
         let source = cmakeSourceDirectory(platform: platform, arch: arch, buildDirectory: buildDirectory)
         let cFlagsText = cFlags(platform: platform, arch: arch).joined(separator: " ")
         let ldFlagsText = ldFlags(platform: platform, arch: arch).joined(separator: " ")
-        return [
+        var arguments = [
             source.path,
             "-DCMAKE_VERBOSE_MAKEFILE=0",
             "-DCMAKE_BUILD_TYPE=\(cmakeBuildType())",
@@ -22,7 +22,13 @@ class CMakeBuilder: Builder {
             "-DCMAKE_INSTALL_LIBDIR=lib",
             "-DCMAKE_OSX_SYSROOT=\(platform.isysroot)",
             "-DCMAKE_OSX_ARCHITECTURES=\(arch.rawValue)",
-            "-DCMAKE_OSX_DEPLOYMENT_TARGET=\(platform.minVersion)",
+        ]
+
+        if platform != .maccatalyst {
+            arguments.append("-DCMAKE_OSX_DEPLOYMENT_TARGET=\(platform.minVersion)")
+        }
+
+        arguments.append(contentsOf: [
             "-DCMAKE_C_FLAGS=\(cFlagsText)",
             "-DCMAKE_CXX_FLAGS=\(cFlagsText)",
             "-DCMAKE_EXE_LINKER_FLAGS=\(ldFlagsText)",
@@ -30,7 +36,8 @@ class CMakeBuilder: Builder {
             "-DCMAKE_MODULE_LINKER_FLAGS=\(ldFlagsText)",
             "-DBUILD_SHARED_LIBS=OFF",
             "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
-        ]
+        ])
+        return arguments
     }
 
     func cmakeExtraConfigureArguments(platform: PlatformType, arch: ArchType, buildDirectory: URL) throws -> [String] {
