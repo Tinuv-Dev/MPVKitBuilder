@@ -13,6 +13,7 @@ class CMakeBuilder: Builder {
         let prefix = ctx.thinDir(lib, platform: platform, arch: arch)
         let source = cmakeSourceDirectory(platform: platform, arch: arch, buildDirectory: buildDirectory)
         let cFlagsText = cFlags(platform: platform, arch: arch).joined(separator: " ")
+        let asmFlagsText = cFlagsText
         let ldFlagsText = ldFlags(platform: platform, arch: arch).joined(separator: " ")
         var arguments = [
             source.path,
@@ -31,6 +32,7 @@ class CMakeBuilder: Builder {
         arguments.append(contentsOf: [
             "-DCMAKE_C_FLAGS=\(cFlagsText)",
             "-DCMAKE_CXX_FLAGS=\(cFlagsText)",
+            "-DCMAKE_ASM_FLAGS=\(asmFlagsText)",
             "-DCMAKE_EXE_LINKER_FLAGS=\(ldFlagsText)",
             "-DCMAKE_SHARED_LINKER_FLAGS=\(ldFlagsText)",
             "-DCMAKE_MODULE_LINKER_FLAGS=\(ldFlagsText)",
