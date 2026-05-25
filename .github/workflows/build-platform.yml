@@ -55,11 +55,62 @@ jobs:
             fi
           done
 
+      - name: Export selected Xcode
+        run: |
+          DEVELOPER_DIR=$(xcode-select -p)
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR"
+          xcodebuild -version
+
       - name: First launch
-        run: sudo xcodebuild -runFirstLaunch
+        run: |
+          sudo xcodebuild -runFirstLaunch
+          xcodebuild -checkFirstLaunchStatus
+          xcrun --kill-cache
 
       - name: Probe SDKs
-        run: xcodebuild -showsdks
+        run: |
+          xcodebuild -showsdks
+          for sdk in iphoneos iphonesimulator appletvos appletvsimulator xros xrsimulator; do
+            echo "== $sdk =="
+            xcrun --no-cache --sdk "$sdk" --show-sdk-path
+            xcrun --no-cache --sdk "$sdk" --show-sdk-platform-path
+          done
+
+      - name: Ensure selected platform components
+        run: |
+          case "${{ inputs.platform }}" in
+            ios|isimulator)
+              PLATFORM=iOS
+              SDKS="iphoneos iphonesimulator"
+              ;;
+            tvos|tvsimulator)
+              PLATFORM=tvOS
+              SDKS="appletvos appletvsimulator"
+              ;;
+            xros|xrsimulator)
+              PLATFORM=visionOS
+              SDKS="xros xrsimulator"
+              ;;
+            *)
+              echo "No downloadable platform component needed for ${{ inputs.platform }}"
+              exit 0
+              ;;
+          esac
+
+          NEED_DOWNLOAD=0
+          for sdk in $SDKS; do
+            echo "checking $sdk"
+            xcrun --no-cache --sdk "$sdk" --show-sdk-path || NEED_DOWNLOAD=1
+            xcrun --no-cache --sdk "$sdk" --show-sdk-platform-path || NEED_DOWNLOAD=1
+          done
+
+          if [ "$NEED_DOWNLOAD" -eq 1 ]; then
+            echo "Downloading $PLATFORM platform components"
+            xcrun --kill-cache
+            xcodebuild -downloadPlatform "$PLATFORM"
+            xcrun --kill-cache
+          fi
 
       - name: Install build tools
         run: |

@@ -44,7 +44,7 @@ Xcode_16.2.app/Contents/Developer/Platforms/XRSimulator.platform/Developer/SDKs
   XRSimulator2.2.sdk
 ```
 
-结论：**Xcode 16.2 自带 iOS / iOS Simulator / tvOS / tvOS Simulator / visionOS / visionOS Simulator 全部设备 + 模拟器 SDK**。MoltenVK 的 `make ios / iossim / tvos / tvossim / visionos / visionossim` 全都跑 `xcodebuild build -destination "generic/platform=..."`，只需要 SDK 不需要 runtime，所以 **不需要再 `xcodebuild -downloadPlatform`**。
+结论：**Xcode 16.2 自带 iOS / iOS Simulator / tvOS / tvOS Simulator / visionOS / visionOS Simulator 全部设备 + 模拟器 SDK**。MoltenVK 的 `make ios / iossim / tvos / tvossim / visionos / visionossim` 全都跑 `xcodebuild build -destination "generic/platform=..."`，只需要 SDK 不需要启动 simulator runtime。但如果 Xcode 的 destination/platform registry 把已有平台误判为未安装，允许用 `xcodebuild -downloadPlatform` 作为 fallback 重新注册平台组件。
 
 ## 已安装的模拟器 runtime 跟 Xcode 不一样
 
@@ -114,7 +114,7 @@ sudo rm -rf "$HOME/Library/Developer/CoreSimulator/Caches"
 
 ## 对原始 "iOS 18.2 is not installed" 报错的复盘
 
-原始报错来源：`make ios` → `xcodebuild build -destination "generic/platform=iOS"` 在 prebuild-vulkan 早期 run 上失败。但本次诊断显示**同一个镜像 + 同一个 Xcode 16.2 上，所有 iOS/tvOS/visionOS SDK 全部就位**。把诊断逻辑塞到失败那条 workflow 同样位置之后，再没有重现。
+原始报错来源：`make ios` → `xcodebuild build -destination "generic/platform=iOS"` 在 prebuild-vulkan 早期 run 上失败。但本次诊断显示**同一个镜像 + 同一个 Xcode 16.2 上，所有 iOS/tvOS/visionOS SDK 全部就位**。后续实跑确认，即使 SDK 和 platform path 都存在，Xcode 的 destination registry 仍可能报 `iOS 18.2 is not installed`，此时需要 `xcodebuild -downloadPlatform iOS` 修复注册状态。
 
 最可能的解释（仍待下一次实跑确认）：
 
@@ -123,7 +123,7 @@ sudo rm -rf "$HOME/Library/Developer/CoreSimulator/Caches"
 
 无论原因为何，下列结论是稳的：
 
-1. **不需要** `xcodebuild -downloadPlatform iOS / tvOS / visionOS`。Xcode 16.2 自带这些 SDK。强行下载会让 prebuild 多耗 10–15 分钟。
+1. 不要默认每次预下载 `iOS / tvOS / visionOS`。Xcode 16.2 自带这些 SDK，强行下载会让 prebuild 多耗 10–15 分钟；但命中 destination/platform 未注册类错误时，应按需执行 `xcodebuild -downloadPlatform` 后重试。
 2. **不需要** `sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes` 这种 Free disk —— 目标路径根本不存在。
 3. 加一行 `sudo xcodebuild -runFirstLaunch` 仍然是便宜的保险，能避免首次跑 Xcode 选 license / 注册的潜在卡点。
 4. 真要省盘，去清 `/Library/Developer/CoreSimulator/Volumes/` 里我们不用的 runtime DMG。但因为本项目纯编译不启动模拟器，连这步都可以省。
