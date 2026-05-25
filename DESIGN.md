@@ -734,7 +734,7 @@ Xcode：Command Line Tools + 全部 SDK（iOS / tvOS / visionOS）。
 - [x] **M4** libmpv：`LibMpvBuilder`（meson）+ libluajit / libuchardet / libbluray 依赖打通
 - [x] **M5** 全平台扩展：ios / isimulator / tvos / tvsimulator / maccatalyst / xros / xrsimulator
 - [x] **M6** 可选库：`libdovi`（Rust + cargo-c），平台不支持时优雅 `platformNotSupported`
-- [ ] **M7** Package 生成 + 收尾：`PackageManifestGenerator` 写 `dist/Package.swift`，最小 Demo SwiftPM 工程验证消费
+- [x] **M7** Package 生成 + 收尾：`PackageManifestGenerator` 写 `dist/Package.swift`，最小 Demo SwiftPM 工程验证消费
 
 ---
 

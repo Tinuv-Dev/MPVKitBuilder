@@ -1,4 +1,4 @@
-.PHONY: build clean report dry-run help
+.PHONY: build clean report dry-run package help
 
 help:
 	@echo "Usage: make [target] [args]"
@@ -7,6 +7,7 @@ help:
 	@echo "  build [args]    Run the builder (default if you just say 'make')"
 	@echo "  dry-run         Print build plan + dependency graph only"
 	@echo "  report          Regenerate reports without building"
+	@echo "  package         Regenerate dist/Package.swift from current dist/"
 	@echo "  clean           Remove build/ dist/ .build/"
 	@echo "  help            This message"
 	@echo ""
@@ -23,6 +24,9 @@ dry-run:
 
 report:
 	swift run --package-path . MPVKitBuilder report $(filter-out $@,$(MAKECMDGOALS)) $(MAKEFLAGS)
+
+package:
+	swift run --package-path . MPVKitBuilder package $(filter-out $@,$(MAKECMDGOALS)) $(MAKEFLAGS)
 
 clean:
 	@rm -rf build dist

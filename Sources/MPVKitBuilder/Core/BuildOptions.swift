@@ -6,6 +6,7 @@ enum BuildCommand: String {
     case report
     case clean
     case assemble
+    case package
 }
 
 enum ForceMode: Equatable {

@@ -15,6 +15,9 @@ enum BuildPipeline {
         case .assemble:
             try AssemblePipeline.run(options, logger: logger)
             return
+        case .package:
+            try generatePackageManifest(options: options, logger: logger)
+            return
         case .dryRun, .build:
             break
         }
@@ -151,6 +154,21 @@ extension BuildPipeline {
             to: options.reportDirectory.appendingPathComponent("build-summary.txt")
         )
         logger.write(.success, "  summary written to \(options.reportDirectory.appendingPathComponent("build-summary.txt").path)")
+
+        if options.generatePackage {
+            logger.section("Package manifest")
+            do {
+                try PackageManifestGenerator.write(distDirectory: options.distDirectory, logger: logger)
+            } catch {
+                // The build itself succeeded; manifest generation failure is non-fatal.
+                logger.write(.warn, "  failed to generate dist/Package.swift: \(error)")
+            }
+        }
+    }
+
+    static func generatePackageManifest(options: BuildOptions, logger: BuildLogger) throws {
+        logger.section("Package manifest")
+        try PackageManifestGenerator.write(distDirectory: options.distDirectory, logger: logger)
     }
 }
 
