@@ -9,9 +9,28 @@ final class LibPlaceboBuilder: MesonBuilder {
         [.vulkan, .libshaderc, .lcms2]
     }
 
+    override func ldFlags(platform: PlatformType, arch: ArchType) -> [String] {
+        // Meson resolves libplacebo deps via pkg-config; injecting dependency -l flags
+        // into global link checks makes probes like stdatomic pick up host libraries.
+        platform.ldFlags(arch: arch)
+    }
+
+    override func cFlags(platform: PlatformType, arch: ArchType) -> [String] {
+        var flags = super.cFlags(platform: platform, arch: arch)
+        if !vulkanIsSupported(on: platform) {
+            let include = ctx.sourceDir(.vulkan)
+                .appendingPathComponent("Package/Release/MoltenVK/include")
+            if FileManager.default.fileExists(atPath: include.path) {
+                flags.append("-I\(include.path)")
+            }
+        }
+        return flags
+    }
+
     override func preCompile() throws {
         try super.preCompile()
         patchDemosMesonBuild()
+        patchVulkanMesonBuild()
         patchVulkanUtilsGen()
         patchVulkanGpuApi14()
         try fetchFastFloatSubmodule()
@@ -73,13 +92,51 @@ final class LibPlaceboBuilder: MesonBuilder {
     override func mesonExtraSetupArguments(platform: PlatformType, arch: ArchType, buildDirectory: URL) throws -> [String] {
         let vkXml = ctx.sourceDir(.vulkan)
             .appendingPathComponent("External/Vulkan-Headers/registry/vk.xml")
-        return [
+        var args = [
             "-Dxxhash=disabled",
             "-Dopengl=disabled",
             "-Dtests=false",
             "-Ddemos=false",
-            "-Dvulkan-registry=\(vkXml.path)",
         ]
+        if vulkanIsSupported(on: platform) {
+            args.append("-Dvulkan=enabled")
+            args.append("-Dvulkan-registry=\(vkXml.path)")
+        } else {
+            args.append("-Dvulkan=disabled")
+            args.append("-Dvk-proc-addr=disabled")
+        }
+        return args
+    }
+
+    func vulkanIsSupported(on platform: PlatformType) -> Bool {
+        Library.vulkan.supportedPlatforms(from: [platform]).contains(platform)
+    }
+
+    func patchVulkanMesonBuild() {
+        let path = ctx.sourceDir(lib).appendingPathComponent("src/vulkan/meson.build")
+        guard var content = try? String(contentsOf: path) else { return }
+        content = content.replacingOccurrences(
+            of: """
+            vulkan_loader = dependency('vulkan', required: false)
+            vulkan_headers = vulkan_loader.partial_dependency(includes: true, compile_args: true)
+            """,
+            with: """
+            vulkan_loader = dependency('vulkan', required: vulkan_build)
+            vulkan_headers = vulkan_loader.found() ? vulkan_loader.partial_dependency(includes: true, compile_args: true) : declare_dependency()
+            """
+        )
+        content = content.replacingOccurrences(
+            of: """
+            build_deps += vulkan_headers
+
+            if vulkan_build.allowed()
+            """,
+            with: """
+            if vulkan_build.allowed()
+              build_deps += vulkan_headers
+            """
+        )
+        try? content.write(to: path, atomically: true, encoding: .utf8)
     }
 
     // Disable SDL demo build — it fails without an SDL2 cross-compile setup
