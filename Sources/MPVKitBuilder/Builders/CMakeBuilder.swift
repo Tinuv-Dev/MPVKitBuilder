@@ -23,6 +23,7 @@ class CMakeBuilder: Builder {
             "-DCMAKE_INSTALL_LIBDIR=lib",
             "-DCMAKE_OSX_SYSROOT=\(platform.isysroot)",
             "-DCMAKE_OSX_ARCHITECTURES=\(arch.rawValue)",
+            // Keeps older upstream CMake projects configuring under CMake 4+.
             "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         ]
 
