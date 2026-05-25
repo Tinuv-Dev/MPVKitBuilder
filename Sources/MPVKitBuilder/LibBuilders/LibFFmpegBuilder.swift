@@ -33,6 +33,7 @@ final class LibFFmpegBuilder: AutoconfBuilder {
         var args = ["--prefix=\(prefix.path)"]
         args += FFmpegOptions.base
         args += FFmpegOptions.platformExtra(platform, arch)
+        args += toolchainArguments(platform: platform)
         args += enableFlags(platform: platform, arch: arch)
         if ctx.options.enableGPL {
             args.append("--enable-gpl")
@@ -52,6 +53,17 @@ final class LibFFmpegBuilder: AutoconfBuilder {
         var env = super.environment(platform: platform, arch: arch)
         env["CPPFLAGS"] = env["CFLAGS"]
         return env
+    }
+
+    override func ldFlags(platform: PlatformType, arch: ArchType) -> [String] {
+        var flags = platform.ldFlags(arch: arch)
+        for dependency in LibraryDependency.transitiveDependencies(of: lib) {
+            let prefix = ctx.thinDir(dependency, platform: platform, arch: arch)
+            let libDir = prefix.appendingPathComponent("lib")
+            guard FileManager.default.fileExists(atPath: libDir.path) else { continue }
+            flags.append("-L\(libDir.path)")
+        }
+        return flags
     }
 
     // MARK: - Pre-compile
@@ -166,6 +178,47 @@ final class LibFFmpegBuilder: AutoconfBuilder {
 // MARK: - Dependency enable flags
 
 extension LibFFmpegBuilder {
+    func toolchainArguments(platform: PlatformType) -> [String] {
+        let clang = platform.xcrunFind(tool: "clang")
+        let clangxx = platform.xcrunFind(tool: "clang++")
+        let ar = platform.xcrunFind(tool: "ar")
+        let ranlib = platform.xcrunFind(tool: "ranlib")
+        let strip = platform.xcrunFind(tool: "strip")
+        let pkgConfig = toolPath("pkg-config") ?? "pkg-config"
+        let hostClang = PlatformType.macos.xcrunFind(tool: "clang")
+        let hostArch: ArchType = ArchType.x86_64.executable ? .x86_64 : .arm64
+        let hostCFlags = PlatformType.macos.cFlags(arch: hostArch).joined(separator: " ")
+        let hostLDFlags = PlatformType.macos.ldFlags(arch: hostArch).joined(separator: " ")
+
+        var args: [String] = []
+        if !clang.isEmpty {
+            args.append("--cc=\(clang)")
+            args.append("--objcc=\(clang)")
+            args.append("--dep-cc=\(clang)")
+            args.append("--ld=\(clang)")
+        }
+        if !clangxx.isEmpty {
+            args.append("--cxx=\(clangxx)")
+        }
+        if !ar.isEmpty {
+            args.append("--ar=\(ar)")
+        }
+        if !ranlib.isEmpty {
+            args.append("--ranlib=\(ranlib)")
+        }
+        if !strip.isEmpty {
+            args.append("--strip=\(strip)")
+        }
+        if !hostClang.isEmpty {
+            args.append("--host-cc=\(hostClang)")
+            args.append("--host-ld=\(hostClang)")
+            args.append("--host-cflags=\(hostCFlags)")
+            args.append("--host-ldflags=\(hostLDFlags)")
+        }
+        args.append("--pkg-config=\(pkgConfig)")
+        return args
+    }
+
     func enableFlags(platform: PlatformType, arch: ArchType) -> [String] {
         var args: [String] = []
         for dep in LibraryDependency.dependencies(of: .ffmpeg) {

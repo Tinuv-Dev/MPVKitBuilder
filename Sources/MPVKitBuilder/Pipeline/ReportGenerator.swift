@@ -69,7 +69,7 @@ enum ReportGenerator {
         lines.append("# Use extra-ffmpeg=\"...\" on the CLI to append one-shot overrides.")
         lines.append("")
 
-        let ffmpegDeps = LibraryDependency.dependencies(of: .ffmpeg)
+        let builder = LibFFmpegBuilder(context: context)
 
         for platform in options.platforms {
             let archs = options.architectures.isEmpty
@@ -77,25 +77,8 @@ enum ReportGenerator {
                 : platform.architectures.filter { options.architectures.contains($0) }
             for arch in archs {
                 lines.append("[\(platform.rawValue) / \(arch.rawValue)]")
-                let prefix = context.thinDir(.ffmpeg, platform: platform, arch: arch)
-                var args = ["--prefix=\(prefix.path)"]
-                args += FFmpegOptions.base
-                args += FFmpegOptions.platformExtra(platform, arch)
-                // Show expected dependency flags for planned build (runtime availability not known yet)
-                for dep in ffmpegDeps {
-                    if !options.enableGPL && dep == .libsmbclient { continue }
-                    if dep.supportedPlatforms(from: [platform]).isEmpty { continue }
-                    args.append("--enable-\(dep.rawValue)")
-                }
-                if options.enableGPL { args.append("--enable-gpl") }
-                if options.enableDebug {
-                    args.append("--enable-debug")
-                    args.append("--disable-stripping")
-                    args.append("--disable-optimizations")
-                }
-                if !options.ffmpegExtraArgs.isEmpty {
-                    args += options.ffmpegExtraArgs
-                }
+                let scratch = context.scratchDir(.ffmpeg, platform: platform, arch: arch)
+                let args = try builder.configureArguments(platform: platform, arch: arch, buildDirectory: scratch)
                 let cmd = "./configure \\\n" + args.map { "    \($0)" }.joined(separator: " \\\n")
                 lines.append(cmd)
                 lines.append("")

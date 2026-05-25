@@ -20,7 +20,7 @@ final class LibVulkanBuilder: Builder {
         ctx.logger.phase("compile")
 
         let externalBuild = source.appendingPathComponent("External/build/Release")
-        if !FileManager.default.fileExists(atPath: externalBuild.path) {
+        if !externalSlicesExist(root: externalBuild, platforms: targetPlatforms) {
             ctx.logger.step("fetchDependencies \(platformArgs.joined(separator: " "))")
             try ctx.runner.launch(
                 executable: source.appendingPathComponent("fetchDependencies").path,
@@ -31,7 +31,7 @@ final class LibVulkanBuilder: Builder {
         }
 
         let xcfBuilt = source.appendingPathComponent("Package/Release/MoltenVK/static/MoltenVK.xcframework")
-        if !FileManager.default.fileExists(atPath: xcfBuilt.path) {
+        if !moltenVKSlicesExist(root: xcfBuilt, platforms: targetPlatforms) {
             ctx.logger.step("make \(targetPlatforms.map(\.name).joined(separator: " "))")
             try ctx.runner.launch(
                 executable: "/usr/bin/make",
@@ -67,13 +67,39 @@ final class LibVulkanBuilder: Builder {
     override func builtLibrariesExist(platform: PlatformType, arch: ArchType) -> Bool {
         let pc = ctx.thinDir(lib, platform: platform, arch: arch)
             .appendingPathComponent("lib/pkgconfig/vulkan.pc")
+        let xcf = ctx.sourceDir(lib)
+            .appendingPathComponent("Package/Release/MoltenVK/static/MoltenVK.xcframework")
         return FileManager.default.fileExists(atPath: pc.path)
+            && moltenVKSliceExists(root: xcf, platform: platform)
     }
 }
 
 // MARK: - pkg-config generation
 
 extension LibVulkanBuilder {
+    func externalSlicesExist(root: URL, platforms: [PlatformType]) -> Bool {
+        let names = ["SPIRVCross.xcframework", "SPIRVTools.xcframework", "glslang.xcframework"]
+        return names.allSatisfy { name in
+            let xcf = root.appendingPathComponent(name)
+            return platforms.allSatisfy { platform in
+                FileManager.default.fileExists(
+                    atPath: xcf.appendingPathComponent(platform.frameworkName).path
+                )
+            }
+        }
+    }
+
+    func moltenVKSlicesExist(root: URL, platforms: [PlatformType]) -> Bool {
+        platforms.allSatisfy { moltenVKSliceExists(root: root, platform: $0) }
+    }
+
+    func moltenVKSliceExists(root: URL, platform: PlatformType) -> Bool {
+        let library = root
+            .appendingPathComponent(platform.frameworkName)
+            .appendingPathComponent("libMoltenVK.a")
+        return FileManager.default.fileExists(atPath: library.path)
+    }
+
     func createPkgConfig(platform: PlatformType, arch: ArchType) throws {
         let thinDir = ctx.thinDir(lib, platform: platform, arch: arch)
         let pcDir = thinDir.appendingPathComponent("lib/pkgconfig")
