@@ -33,11 +33,27 @@ jobs:
             fi
           done
 
+      - name: Export selected Xcode
+        run: |
+          DEVELOPER_DIR=$(xcode-select -p)
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR"
+          xcodebuild -version
+
       - name: First launch
-        run: sudo xcodebuild -runFirstLaunch
+        run: |
+          sudo xcodebuild -runFirstLaunch
+          xcodebuild -checkFirstLaunchStatus
+          xcrun --kill-cache
 
       - name: Probe SDKs
-        run: xcodebuild -showsdks
+        run: |
+          xcodebuild -showsdks
+          for sdk in iphoneos iphonesimulator appletvos appletvsimulator xros xrsimulator; do
+            echo "== $sdk =="
+            xcrun --no-cache --sdk "$sdk" --show-sdk-path
+            xcrun --no-cache --sdk "$sdk" --show-sdk-platform-path
+          done
 
       - name: Install build tools
         run: |
@@ -46,10 +62,34 @@ jobs:
 
       - name: Build MoltenVK
         run: |
+          set +e
           swift run --package-path . MPVKitBuilder build \
             only=vulkan \
             platform=${{ inputs.platforms }} \
             verbose
+          STATUS=$?
+
+          if [ "$STATUS" -eq 0 ]; then
+            exit 0
+          fi
+
+          LOG=.build/reports/log/vulkan.log
+          if [ -f "$LOG" ] && grep -Eq "Unable to find a destination matching|is not installed" "$LOG"; then
+            echo "Xcode destination/platform registry looks broken; downloading platform components and retrying."
+            xcrun --kill-cache
+            for platform in iOS tvOS visionOS; do
+              xcodebuild -downloadPlatform "$platform"
+            done
+            xcrun --kill-cache
+
+            swift run --package-path . MPVKitBuilder build \
+              only=vulkan \
+              platform=${{ inputs.platforms }} \
+              verbose
+            exit $?
+          fi
+
+          exit "$STATUS"
 
       - name: Stage prebuilt bundle
         run: |
