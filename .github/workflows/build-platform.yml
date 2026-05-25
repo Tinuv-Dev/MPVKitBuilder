@@ -43,6 +43,20 @@ jobs:
         with:
           xcode-version: '16.2'
 
+      - name: Free disk (drop unused Xcodes)
+        run: |
+          df -h /
+          SELECTED=$(xcode-select -p)
+          KEEP=$(dirname "$(dirname "$SELECTED")")
+          echo "keeping $KEEP"
+          for app in /Applications/Xcode*.app; do
+            if [ "$app" != "$KEEP" ]; then
+              echo "removing $app"
+              sudo rm -rf "$app"
+            fi
+          done
+          df -h /
+
       - name: First launch
         run: sudo xcodebuild -runFirstLaunch
 

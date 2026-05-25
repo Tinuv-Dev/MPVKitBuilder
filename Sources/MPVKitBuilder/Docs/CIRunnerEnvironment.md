@@ -130,13 +130,27 @@ sudo rm -rf "$HOME/Library/Developer/CoreSimulator/Caches"
 
 ## 对 workflow 的处置建议
 
-依据上面四条，`prebuild-vulkan.yml` 和 `build-platform.yml` 的环境准备段可以收成：
+依据上面四条以及"删未使用 Xcode 释放 ~35GB"这一点，`prebuild-vulkan.yml` 和 `build-platform.yml` 的环境准备段标准做法是：
 
 ```yaml
 - name: Pin Xcode
   uses: maxim-lobanov/setup-xcode@v1
   with:
     xcode-version: '16.2'
+
+- name: Free disk (drop unused Xcodes)
+  run: |
+    df -h /
+    SELECTED=$(xcode-select -p)
+    KEEP=$(dirname "$(dirname "$SELECTED")")
+    echo "keeping $KEEP"
+    for app in /Applications/Xcode*.app; do
+      if [ "$app" != "$KEEP" ]; then
+        echo "removing $app"
+        sudo rm -rf "$app"
+      fi
+    done
+    df -h /
 
 - name: First launch
   run: sudo xcodebuild -runFirstLaunch
@@ -145,7 +159,54 @@ sudo rm -rf "$HOME/Library/Developer/CoreSimulator/Caches"
   run: xcodebuild -showsdks
 ```
 
-去掉旧 `Free disk` 和我之前加的 `Download platforms`。把 `xcodebuild -showsdks` 留在那里当 smoke test：CI log 里能一眼看出预期的六个目标 SDK 在不在，不在的话直接拿到证据再加 downloadPlatform。
+**强制要求**：任何会跑重型编译的 workflow，在 `Pin Xcode` 之后**必须**立刻删除未选中的 Xcode.app。理由：
+
+- runner 镜像同时预装 9 个 Xcode，约 ~40GB，我们只用其中一个，剩下 ~35GB 是死重。
+- 删除写在 `Pin Xcode` 之后保证 `xcode-select -p` 指向的 Xcode 不会被误删；脚本读 `xcode-select -p` 推回 `Xcode_*.app` 路径，删其他所有 `Xcode*.app` 软/硬连接。
+- `/Applications/Xcode.app` 默认指向 `Xcode_16.4.app`，删完会变成悬挂软链 —— 没问题，CI 全程都用 `xcode-select` 已经切好的绝对路径，不依赖那个软链。
+- 不要去清 `/Library/Developer/CoreSimulator/Volumes/` 下的 runtime DMG，那一棵跟选中 Xcode 之间的依赖关系不清晰，删错会引入"iOS 18.2 is not installed"这类难排查问题。
+
+剩下两步：
+- `First launch` 跑 `-runFirstLaunch`，吃掉首跑 Xcode 的 license / 注册步骤。
+- `Probe SDKs` 跑 `xcodebuild -showsdks`，把 CI log 里"这次 Xcode 看到哪些 SDK"留个证据。未来如果再出现 "iOS X.X is not installed" 这类报错，能第一时间确认是 SDK 缺失还是别的原因。
+
+## Xcode 16.2 还是 26.x 的取舍
+
+2026-05-25 讨论结果：CI 暂用 Xcode 16.2，若失败再考虑升级。完整背景记下来便于以后翻账。
+
+### 事实
+
+- 本地环境：macOS 26 + Xcode 26.x。本地构建已验证通过。
+- macos-15 runner 镜像里 `Xcode_26.0.1.app` / `26.1.1.app` / `26.2.app` / `26.3.app` 全部预装，每个 ~4.3GB 实体目录，可用。Apple 允许 Xcode 26 直接跑在 macOS 15 上，**不需要换 `runs-on`**。
+- GitHub 是否上线 `macos-26` runner 标签未确认。即便上线，对纯编译链路意义不大，因为关键工具链来自 Xcode.app 本身，跟 runner OS 关系小。
+
+### 选 16.2 的理由（当前选择）
+
+- 当前 prebuild-vulkan 第一次失败的根因还没复现确认。一次升级 Xcode 大版本会再叠一个变量，将来不好分辨。
+- iOS 18.2 SDK 出来的 XCFramework，消费方 Xcode 16.x 和 26.x 都能链；反过来用 iOS 26 SDK 产出，消费方必须 Xcode 26+。对公开二进制分发面更窄。
+- MoltenVK / FFmpeg / libplacebo / libmpv 这一摞 C/C++ 项目在新 Xcode 上的兼容性是不确定项。本地一台机器通过不等于干净 runner 上一定通过。
+
+### 选 26.x 的理由（暂未采用）
+
+- 跟本地完全对齐，消除 toolchain 这个变量。这是最强论点 —— "本地能跑"这条证据其实指向 26.x。
+- 新 SDK / 新 compiler / 新 patch。
+- runner 自带 iOS 26.x 等更新的 simulator runtime（虽然我们这条链路不需要 runtime）。
+
+### 切换 26.x 的实际改法（备用）
+
+如果 16.2 跑挂了：
+
+```yaml
+runs-on: macos-15           # 不动
+- name: Pin Xcode
+  uses: maxim-lobanov/setup-xcode@v1
+  with:
+    xcode-version: '26.2'   # 改成本地实际使用的小版本
+```
+
+`maxim-lobanov/setup-xcode` 等价于 `xcode-select` 切到对应 Xcode.app，没别的副作用。注意 pin 到具体小版本（26.0.1 / 26.1.1 / 26.2 / 26.3），不要用 `'26.x'` 浮动，避免 GitHub 镜像更新时 CI 行为悄悄变。
+
+切换后还要复核 `Sources/MPVKitBuilder/Docs/` 里 SDK 版本相关的假设（iOS 18.2 → iOS 26.x，consumer minimum 跟着变），以及 [ConsumerUsage.md](ConsumerUsage.md) 里对最低 Xcode 的说明。
 
 ## 复跑诊断的方式
 
