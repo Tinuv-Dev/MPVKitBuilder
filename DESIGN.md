@@ -732,7 +732,7 @@ Xcode：Command Line Tools + 全部 SDK（iOS / tvOS / visionOS）。
 - [x] **M2** 三种构建系统策略：`CMakeBuilder / MesonBuilder / WafBuilder`；分别用 `lcms2 / libdav1d / libsmbclient` 单测
 - [x] **M3** FFmpeg 主链路：`LibFFmpegBuilder + FFmpegOptions`，`ffmpeg-configure.txt` 落盘并可被 `extra-ffmpeg=` 改写
 - [x] **M4** libmpv：`LibMpvBuilder`（meson）+ libluajit / libuchardet / libbluray 依赖打通
-- [ ] **M5** 全平台扩展：ios / isimulator / tvos / tvsimulator / maccatalyst / xros / xrsimulator
+- [x] **M5** 全平台扩展：ios / isimulator / tvos / tvsimulator / maccatalyst / xros / xrsimulator
 - [ ] **M6** 可选库：`libdovi`（Rust + cargo-c），平台不支持时优雅 `platformNotSupported`
 - [ ] **M7** Package 生成 + 收尾：`PackageManifestGenerator` 写 `dist/Package.swift`，最小 Demo SwiftPM 工程验证消费
 
