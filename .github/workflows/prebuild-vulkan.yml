@@ -1,0 +1,75 @@
+name: Prebuild Vulkan (MoltenVK)
+
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: 'Comma-separated platforms to bake into MoltenVK.xcframework'
+        type: string
+        default: 'macos,ios,isimulator,tvos,tvsimulator,xros,xrsimulator'
+
+jobs:
+  prebuild:
+    name: vulkan (all platforms)
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.2'
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes || true
+          sudo rm -rf "$HOME/Library/Developer/CoreSimulator/Caches" || true
+          df -h
+
+      - name: Install build tools
+        run: |
+          brew update
+          brew install cmake meson ninja nasm pkg-config autoconf automake libtool
+
+      - name: Build MoltenVK
+        run: |
+          swift run --package-path . MPVKitBuilder build \
+            only=vulkan \
+            platform=${{ inputs.platforms }}
+
+      - name: Stage prebuilt bundle
+        run: |
+          set -e
+          mkdir -p prebuilt-vulkan
+          cp -R dist/MoltenVK.xcframework prebuilt-vulkan/
+
+          # Locate the MoltenVK include/ from whichever vulkan-source-<ver>/ directory
+          # the builder cloned. Version comes from Library.swift, so don't hardcode it here.
+          INCLUDE=$(ls -d build/vulkan-source-*/Package/Release/MoltenVK/include | head -n1)
+          if [ -z "$INCLUDE" ]; then
+            echo "could not locate MoltenVK include directory under build/"
+            exit 1
+          fi
+          cp -R "$INCLUDE" prebuilt-vulkan/include
+
+          du -sh prebuilt-vulkan
+          ls prebuilt-vulkan/MoltenVK.xcframework
+          ls prebuilt-vulkan/include
+          tar -cJf vulkan-prebuilt.tar.xz prebuilt-vulkan
+          ls -lh vulkan-prebuilt.tar.xz
+
+      - name: Upload prebuilt-vulkan
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulkan-prebuilt-${{ github.run_number }}
+          path: vulkan-prebuilt.tar.xz
+          retention-days: 7
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulkan-reports-${{ github.run_number }}
+          path: .build/reports
+          retention-days: 7

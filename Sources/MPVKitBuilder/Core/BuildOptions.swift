@@ -5,6 +5,7 @@ enum BuildCommand: String {
     case dryRun = "dry-run"
     case report
     case clean
+    case assemble
 }
 
 enum ForceMode: Equatable {
@@ -26,6 +27,7 @@ struct BuildOptions {
     var enableGPL: Bool = true
     var enableDebug: Bool = false
     var enableSplitPlatform: Bool = false
+    var cleanAfterLib: Bool = false
 
     var force: ForceMode = .none
     var only: Set<Library> = []
@@ -33,6 +35,16 @@ struct BuildOptions {
     var ffmpegExtraArgs: [String] = []
     var generatePackage: Bool = true
     var verboseOutput: Bool = false
+
+    /// Optional path to a prebuilt MoltenVK bundle. The bundle is expected to be a directory
+    /// containing `MoltenVK.xcframework/` and `include/` (with `vulkan/`, `vk_video/`, `MoltenVK/`).
+    /// When set, LibVulkanBuilder skips fetchDependencies/make and just writes vulkan.pc files
+    /// for downstream consumers (libplacebo, ffmpeg) and copies the xcframework through.
+    var prebuiltVulkanDir: URL?
+
+    /// Optional explicit override for the per-platform staging directory used by split-platform mode.
+    /// Defaults to `dist-platform/` next to `dist/`.
+    var splitPlatformDirectory: URL?
 }
 
 extension BuildOptions {
@@ -48,6 +60,12 @@ extension BuildOptions {
             reportDirectory: root.appendingPathComponent(".build/reports"),
             stateFile: root.appendingPathComponent(".build/state.json")
         )
+    }
+
+    /// Where per-platform .framework bundles land in split-platform mode.
+    var resolvedSplitPlatformDirectory: URL {
+        splitPlatformDirectory
+            ?? distDirectory.deletingLastPathComponent().appendingPathComponent("dist-platform")
     }
 }
 
@@ -86,10 +104,12 @@ extension BuildOptions {
         case "disable-gpl":            opt.enableGPL = false
         case "enable-debug":           opt.enableDebug = true
         case "disable-debug":          opt.enableDebug = false
-        case "enable-split-platform":  opt.enableSplitPlatform = true
-        case "disable-package":        opt.generatePackage = false
+        case "enable-split-platform",
+             "split-platform":          opt.enableSplitPlatform = true
+        case "clean-after-lib":         opt.cleanAfterLib = true
+        case "disable-package":         opt.generatePackage = false
         case "--verbose", "verbose":    opt.verboseOutput = true
-        case "dry-run":                opt.command = .dryRun
+        case "dry-run":                 opt.command = .dryRun
         default:
             // ignore unknown flag-like tokens silently (make passes its own MAKEFLAGS)
             break
@@ -127,6 +147,10 @@ extension BuildOptions {
             opt.workDirectory = URL(fileURLWithPath: value)
         case "dist-dir":
             opt.distDirectory = URL(fileURLWithPath: value)
+        case "prebuilt-vulkan":
+            opt.prebuiltVulkanDir = URL(fileURLWithPath: value)
+        case "split-platform-dir":
+            opt.splitPlatformDirectory = URL(fileURLWithPath: value)
         default:
             break
         }

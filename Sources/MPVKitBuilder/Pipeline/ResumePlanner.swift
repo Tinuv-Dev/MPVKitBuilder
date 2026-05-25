@@ -91,17 +91,35 @@ enum ResumePlanner {
             "v=\(lib.version)",
             "gpl=\(options.enableGPL)",
             "debug=\(options.enableDebug)",
+            "split=\(options.enableSplitPlatform)",
             "platforms=\(options.platforms.map(\.rawValue).sorted().joined(separator: ","))",
             "archs=\(options.architectures.map(\.rawValue).sorted().joined(separator: ","))",
         ]
         if lib == .ffmpeg || lib == .libmpv {
             parts.append("ffmpegExtra=\(options.ffmpegExtraArgs.joined(separator: " "))")
         }
+        if lib == .vulkan, let prebuilt = options.prebuiltVulkanDir {
+            parts.append("prebuiltVulkan=\(prebuilt.path)")
+        }
         return parts.joined(separator: "|")
     }
 
     static func outputsExist(for lib: Library, options: BuildOptions) -> Bool {
-        lib.expectedFrameworks.allSatisfy { framework in
+        if options.enableSplitPlatform {
+            // In split-platform mode the durable per-job output is `dist-platform/<p>/<Fw>.framework`
+            // for every requested platform that the library actually supports.
+            let supported = lib.supportedPlatforms(from: options.platforms)
+            if supported.isEmpty { return false }
+            return lib.expectedFrameworks.allSatisfy { framework in
+                supported.allSatisfy { platform in
+                    let url = options.resolvedSplitPlatformDirectory
+                        .appendingPathComponent(platform.rawValue)
+                        .appendingPathComponent("\(framework).framework")
+                    return FileManager.default.fileExists(atPath: url.path)
+                }
+            }
+        }
+        return lib.expectedFrameworks.allSatisfy { framework in
             let url = options.distDirectory.appendingPathComponent("\(framework).xcframework")
             return FileManager.default.fileExists(atPath: url.path)
         }

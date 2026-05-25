@@ -8,19 +8,35 @@ final class XCFrameworkAssembler {
     }
 
     func create(builder: Builder) throws {
+        let splitMode = ctx.options.enableSplitPlatform
+
         for framework in try builder.frameworks() {
-            var arguments = ["-create-xcframework"]
+            var frameworkURLs: [URL] = []
             for platform in builder.platforms() {
                 let frameworkURL = try createFramework(builder: builder, framework: framework, platform: platform)
-                arguments.append("-framework")
-                arguments.append(frameworkURL.path)
+                frameworkURLs.append(frameworkURL)
+
+                if splitMode {
+                    try copyToSplitPlatform(frameworkURL: frameworkURL, framework: framework, platform: platform)
+                }
+            }
+
+            if splitMode {
+                // Don't assemble the multi-platform xcframework — the aggregate step
+                // (`MPVKitBuilder assemble`) will do that after downloading every
+                // platform job's slices.
+                continue
             }
 
             let output = ctx.xcFrameworkURL(framework: framework)
             try removeIfExists(output)
+            var arguments = ["-create-xcframework"]
+            for url in frameworkURLs {
+                arguments.append("-framework")
+                arguments.append(url.path)
+            }
             arguments.append("-output")
             arguments.append(output.path)
-
             try ctx.runner.launch(
                 executable: "/usr/bin/xcodebuild",
                 arguments: arguments,
@@ -28,6 +44,16 @@ final class XCFrameworkAssembler {
             )
             ctx.logger.step("created \(output.path)")
         }
+    }
+
+    func copyToSplitPlatform(frameworkURL: URL, framework: String, platform: PlatformType) throws {
+        let platformDir = ctx.options.resolvedSplitPlatformDirectory
+            .appendingPathComponent(platform.rawValue)
+        try FileManager.default.createDirectory(at: platformDir, withIntermediateDirectories: true)
+        let target = platformDir.appendingPathComponent("\(framework).framework")
+        try removeIfExists(target)
+        try FileManager.default.copyItem(at: frameworkURL, to: target)
+        ctx.logger.step("split-platform: \(target.path)")
     }
 }
 

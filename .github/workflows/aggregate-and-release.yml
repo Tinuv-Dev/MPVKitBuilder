@@ -1,0 +1,120 @@
+name: Aggregate & Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      vulkan_run_id:
+        description: 'Run ID of the Prebuild Vulkan run whose artifact to consume (the number in the run URL).'
+        type: string
+        required: true
+      slice_run_ids:
+        description: 'Comma-separated list of "platform:run_id" pairs (e.g. "ios:1234567890,macos:1234567891"). Each platform is fetched from the matching Build Platform run.'
+        type: string
+        required: true
+      tag:
+        description: 'Optional tag/name for the GitHub Release (leave blank to skip release publish)'
+        type: string
+        required: false
+
+jobs:
+  aggregate:
+    name: aggregate xcframeworks
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.2'
+
+      - name: Download prebuilt vulkan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          mkdir -p vulkan-archive
+          ARTIFACT=$(gh run view "${{ inputs.vulkan_run_id }}" \
+            --repo "${{ github.repository }}" \
+            --json artifacts \
+            --jq '.artifacts[] | select(.name | startswith("vulkan-prebuilt-")) | .name' \
+            | head -n1)
+          if [ -z "$ARTIFACT" ]; then
+            echo "no vulkan-prebuilt-* artifact found on run ${{ inputs.vulkan_run_id }}"
+            exit 1
+          fi
+          gh run download "${{ inputs.vulkan_run_id }}" \
+            --repo "${{ github.repository }}" \
+            --name "$ARTIFACT" \
+            --dir vulkan-archive
+          tar -xJf vulkan-archive/vulkan-prebuilt.tar.xz
+          mkdir -p dist-platform
+          cp -R prebuilt-vulkan/MoltenVK.xcframework dist-platform/
+
+      - name: Download platform slices
+        env:
+          PAIRS: ${{ inputs.slice_run_ids }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          mkdir -p slice-archives
+          IFS=',' read -ra ENTRIES <<< "$PAIRS"
+          for entry in "${ENTRIES[@]}"; do
+            entry="${entry// /}"
+            platform="${entry%%:*}"
+            run_id="${entry##*:}"
+            artifact=$(gh run view "$run_id" \
+              --repo "$REPO" \
+              --json artifacts \
+              --jq ".artifacts[] | select(.name | startswith(\"slice-${platform}-\")) | .name" \
+              | head -n1)
+            if [ -z "$artifact" ]; then
+              echo "no slice-${platform}-* artifact found on run $run_id"
+              exit 1
+            fi
+            echo "==> downloading $artifact from run $run_id"
+            gh run download "$run_id" \
+              --repo "$REPO" \
+              --name "$artifact" \
+              --dir "slice-archives/${platform}"
+          done
+          ls -R slice-archives
+
+      - name: Unpack platform slices
+        run: |
+          set -e
+          for tar in slice-archives/*/slice-*.tar.xz; do
+            tar -xJf "$tar" -C dist-platform
+          done
+          ls dist-platform
+
+      - name: Assemble xcframeworks
+        run: swift run --package-path . MPVKitBuilder assemble
+
+      - name: Show dist
+        run: |
+          ls -lh dist
+          du -sh dist/*.xcframework | sort -h
+
+      - name: Pack final bundle
+        run: |
+          tar -cJf mpvkit-${{ inputs.tag || github.run_number }}.tar.xz -C dist .
+          ls -lh mpvkit-*.tar.xz
+
+      - name: Upload aggregated artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpvkit-${{ inputs.tag || github.run_number }}
+          path: mpvkit-${{ inputs.tag || github.run_number }}.tar.xz
+          retention-days: 7
+
+      - name: Publish GitHub Release
+        if: ${{ inputs.tag != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: ${{ inputs.tag }}
+          files: mpvkit-*.tar.xz
+          generate_release_notes: true

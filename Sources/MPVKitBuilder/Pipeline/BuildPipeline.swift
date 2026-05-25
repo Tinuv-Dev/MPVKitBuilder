@@ -12,6 +12,9 @@ enum BuildPipeline {
         case .report:
             try report(options: options, logger: logger)
             return
+        case .assemble:
+            try AssemblePipeline.run(options, logger: logger)
+            return
         case .dryRun, .build:
             break
         }
@@ -118,6 +121,9 @@ extension BuildPipeline {
                 )
                 logger.libraryFinished(name: lib.rawValue)
                 records.append(.init(library: lib, success: true, elapsed: Date().timeIntervalSince(started)))
+                if options.cleanAfterLib {
+                    cleanIntermediateOutputs(for: lib, options: options, logger: logger, ctx: ctx)
+                }
             } catch {
                 try? store.markFailed(
                     lib,
@@ -160,6 +166,43 @@ extension BuildPipeline {
     static func removeIfExists(_ url: URL) throws {
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// Aggressive cleanup after a library has been fully built. Used by `clean-after-lib`
+    /// so GitHub-hosted runners can survive the 14 GB SSD budget. We keep `thin/` (downstream
+    /// compiles need the static libs + headers + .pc files) and `<lib>-frameworks/` (the
+    /// XCFrameworkAssembler reads from it when reassembling on resume), and drop everything
+    /// that can be regenerated: the cloned source tree and every per-platform scratch dir.
+    static func cleanIntermediateOutputs(for lib: Library, options: BuildOptions, logger: BuildLogger, ctx: BuildContext) {
+        let fm = FileManager.default
+        var freed: [String] = []
+
+        // 1. source tree (`build/<lib>-source-<ver>/`).
+        let source = ctx.sourceDir(lib)
+        if fm.fileExists(atPath: source.path) {
+            try? fm.removeItem(at: source)
+            freed.append(source.lastPathComponent)
+        }
+
+        // 2. per-platform scratch (`build/<lib>-build/<platform>/scratch/`).
+        let buildRoot = ctx.libBuildRoot(lib)
+        if let platforms = try? fm.contentsOfDirectory(atPath: buildRoot.path) {
+            for platform in platforms {
+                let scratch = buildRoot
+                    .appendingPathComponent(platform)
+                    .appendingPathComponent("scratch")
+                if fm.fileExists(atPath: scratch.path) {
+                    try? fm.removeItem(at: scratch)
+                    freed.append("\(lib.rawValue)-build/\(platform)/scratch")
+                }
+            }
+        }
+
+        if freed.isEmpty {
+            logger.write(.info, "  clean-after-lib: nothing to remove for \(lib.rawValue)")
+        } else {
+            logger.write(.info, "  clean-after-lib: removed \(freed.joined(separator: ", "))")
         }
     }
 }

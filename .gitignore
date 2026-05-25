@@ -6,6 +6,14 @@ Package.resolved
 # Build outputs of the builder
 build/
 dist/
+dist-platform/
+prebuilt-vulkan/
+prebuilt-vulkan-archive/
+vulkan-archive/
+slice-archives/
+slice-*.tar.xz
+vulkan-prebuilt.tar.xz
+mpvkit-*.tar.xz
 *.log
 
 # macOS

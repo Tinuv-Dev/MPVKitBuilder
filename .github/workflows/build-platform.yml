@@ -1,0 +1,132 @@
+name: Build Platform
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Single platform to build (macos, ios, isimulator, tvos, tvsimulator, xros, xrsimulator, maccatalyst)'
+        type: choice
+        required: true
+        default: ios
+        options:
+          - macos
+          - ios
+          - isimulator
+          - tvos
+          - tvsimulator
+          - xros
+          - xrsimulator
+          - maccatalyst
+      vulkan_run_id:
+        description: 'Run ID of a successful Prebuild Vulkan run (the "Run ID" in the URL, e.g. 1234567890). Used to download the vulkan-prebuilt-* artifact.'
+        type: string
+        required: true
+      enable_gpl:
+        description: 'Enable GPL (includes libsmbclient)'
+        type: boolean
+        default: false
+      extra_ffmpeg:
+        description: 'Extra FFmpeg configure args'
+        type: string
+        required: false
+
+jobs:
+  build:
+    name: build ${{ inputs.platform }}
+    runs-on: macos-15
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.2'
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes || true
+          sudo rm -rf "$HOME/Library/Developer/CoreSimulator/Caches" || true
+          df -h
+
+      - name: Install build tools
+        run: |
+          brew update
+          brew install cmake meson ninja nasm pkg-config autoconf automake libtool
+
+      - name: Download prebuilt vulkan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          mkdir -p prebuilt-vulkan-archive
+          # The artifact name uses the prebuild-vulkan run number, but `gh run download`
+          # only needs the run ID — let it list and download whatever artifact starts with
+          # "vulkan-prebuilt-" on that run.
+          ARTIFACT=$(gh run view "${{ inputs.vulkan_run_id }}" \
+            --repo "${{ github.repository }}" \
+            --json artifacts \
+            --jq '.artifacts[] | select(.name | startswith("vulkan-prebuilt-")) | .name' \
+            | head -n1)
+          if [ -z "$ARTIFACT" ]; then
+            echo "no vulkan-prebuilt-* artifact found on run ${{ inputs.vulkan_run_id }}"
+            exit 1
+          fi
+          echo "downloading $ARTIFACT"
+          gh run download "${{ inputs.vulkan_run_id }}" \
+            --repo "${{ github.repository }}" \
+            --name "$ARTIFACT" \
+            --dir prebuilt-vulkan-archive
+          ls -R prebuilt-vulkan-archive
+          tar -xJf prebuilt-vulkan-archive/vulkan-prebuilt.tar.xz
+          ls prebuilt-vulkan
+          ls prebuilt-vulkan/MoltenVK.xcframework
+
+      - name: Build platform
+        env:
+          PREBUILT_VULKAN: ${{ github.workspace }}/prebuilt-vulkan
+        run: |
+          set -x
+          ARGS=(
+            platform=${{ inputs.platform }}
+            split-platform
+            clean-after-lib
+            prebuilt-vulkan=$PREBUILT_VULKAN
+          )
+          if [ "${{ inputs.enable_gpl }}" = "true" ]; then
+            ARGS+=(enable-gpl)
+          else
+            ARGS+=(disable-gpl)
+          fi
+          if [ -n "${{ inputs.extra_ffmpeg }}" ]; then
+            ARGS+=("extra-ffmpeg=${{ inputs.extra_ffmpeg }}")
+          fi
+          swift run --package-path . MPVKitBuilder build "${ARGS[@]}"
+
+      - name: Disk after build
+        if: always()
+        run: |
+          df -h
+          du -sh build dist dist-platform 2>/dev/null || true
+
+      - name: Stage slice
+        run: |
+          ls dist-platform
+          du -sh dist-platform/${{ inputs.platform }}
+          tar -cJf slice-${{ inputs.platform }}.tar.xz -C dist-platform ${{ inputs.platform }}
+          ls -lh slice-${{ inputs.platform }}.tar.xz
+
+      - name: Upload slice
+        uses: actions/upload-artifact@v4
+        with:
+          name: slice-${{ inputs.platform }}-${{ github.run_number }}
+          path: slice-${{ inputs.platform }}.tar.xz
+          retention-days: 7
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ inputs.platform }}-${{ github.run_number }}
+          path: .build/reports
+          retention-days: 7

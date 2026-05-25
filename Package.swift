@@ -8,7 +8,7 @@ let package = Package(
         .executableTarget(
             name: "MPVKitBuilder",
             path: "Sources/MPVKitBuilder",
-            exclude: ["Resources/Patch/.gitkeep"],
+            exclude: ["Resources/Patch/.gitkeep", "Docs"],
             resources: [
                 .copy("Resources/Patch"),
             ]
