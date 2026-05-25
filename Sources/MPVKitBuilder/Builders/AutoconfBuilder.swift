@@ -8,10 +8,18 @@ class AutoconfBuilder: Builder {
     func configureArguments(platform: PlatformType, arch: ArchType, buildDirectory: URL) throws -> [String] {
         [
             "--prefix=\(ctx.thinDir(lib, platform: platform, arch: arch).path)",
+            "--build=\(buildHost())",
             "--host=\(platform.host(arch: arch))",
             "--enable-static",
             "--disable-shared",
         ]
+    }
+
+    func buildHost() -> String {
+        if ArchType.x86_64.executable {
+            return "x86_64-apple-darwin"
+        }
+        return "aarch64-apple-darwin"
     }
 
     func configureWorkingDirectory(platform: PlatformType, arch: ArchType, buildDirectory: URL) -> URL {

@@ -9,11 +9,6 @@ final class LibBlurayBuilder: AutoconfBuilder {
         [.libfreetype]
     }
 
-    // Only macOS supports disc mounting (platform constraint from upstream)
-    override func platforms() -> [PlatformType] {
-        super.platforms().filter { $0 == .macos }
-    }
-
     override func preCompile() throws {
         try super.preCompile()
         // libudfread is a git submodule — not fetched by shallow clone

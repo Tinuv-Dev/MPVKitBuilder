@@ -5,6 +5,7 @@ struct BuildPlan {
     let toBuild: [Library]          // libraries to actually run
     let skipFinished: [Library]     // already finished, skipped
     let skipExplicit: [Library]     // skipped because skip=
+    let skipUnsupported: [Library]  // skipped because no requested platform is supported
     let forcedRebuild: Set<Library> // forced to rebuild (via force=)
 }
 
@@ -21,6 +22,7 @@ enum ResumePlanner {
         var toBuild: [Library] = []
         var skipFinished: [Library] = []
         var skipExplicit: [Library] = []
+        var skipUnsupported: [Library] = []
 
         for lib in order {
             if options.skip.contains(lib) {
@@ -29,6 +31,10 @@ enum ResumePlanner {
             }
             if !onlyFilter.isEmpty, !onlyFilter.contains(lib) {
                 skipExplicit.append(lib)
+                continue
+            }
+            if lib.supportedPlatforms(from: options.platforms).isEmpty {
+                skipUnsupported.append(lib)
                 continue
             }
             if !forced.contains(lib),
@@ -45,6 +51,7 @@ enum ResumePlanner {
             toBuild: toBuild,
             skipFinished: skipFinished,
             skipExplicit: skipExplicit,
+            skipUnsupported: skipUnsupported,
             forcedRebuild: forced
         )
     }

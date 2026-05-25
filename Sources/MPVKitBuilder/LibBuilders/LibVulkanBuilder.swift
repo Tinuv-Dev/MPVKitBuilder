@@ -10,11 +10,6 @@ final class LibVulkanBuilder: Builder {
         super.init(lib: .vulkan, context: context)
     }
 
-    // maccatalyst is not supported by MoltenVK
-    override func platforms() -> [PlatformType] {
-        super.platforms().filter { $0 != .maccatalyst }
-    }
-
     // MARK: - Build override
 
     override func compile() throws {

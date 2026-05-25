@@ -70,9 +70,9 @@ extension PlatformType {
     }
 
     /// Architectures used when the user did not pass `arch=` on the CLI.
-    /// x86_64 is supported but no longer built by default.
+    /// x86_64 and arm64e are supported selectively but stay opt-in.
     var defaultArchitectures: [ArchType] {
-        architectures.filter { $0 != .x86_64 }
+        architectures.filter { $0 != .x86_64 && $0 != .arm64e }
     }
 
     var sdk: String {

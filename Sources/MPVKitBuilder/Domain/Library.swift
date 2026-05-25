@@ -124,6 +124,17 @@ extension Library {
         }
     }
 
+    func supportedPlatforms(from requested: [PlatformType]) -> [PlatformType] {
+        switch self {
+        case .libbluray:
+            return requested.filter { $0 == .macos }
+        case .vulkan, .libzvbi:
+            return requested.filter { $0 != .maccatalyst }
+        default:
+            return requested
+        }
+    }
+
     /// Whether this library is enabled by ffmpeg when present (used to auto-emit `--enable-libxxx`).
     var isFFmpegDependentLibrary: Bool {
         switch self {

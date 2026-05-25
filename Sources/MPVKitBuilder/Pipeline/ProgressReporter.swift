@@ -10,7 +10,7 @@ enum ProgressReporter {
         logger.kv("GPL", options.enableGPL ? "ON" : "OFF")
         logger.kv("Debug", options.enableDebug ? "ON" : "OFF")
         logger.kv("Verbose", options.verboseOutput ? "ON" : "OFF")
-        logger.kv("Resume", "\(plan.skipFinished.count) finished, \(plan.toBuild.count) to build, \(plan.skipExplicit.count) filtered")
+        logger.kv("Resume", "\(plan.skipFinished.count) finished, \(plan.toBuild.count) to build, \(plan.skipExplicit.count) filtered, \(plan.skipUnsupported.count) unsupported")
         if !plan.forcedRebuild.isEmpty {
             let names = plan.forcedRebuild.map(\.rawValue).sorted().joined(separator: ", ")
             logger.kv("Force", names)

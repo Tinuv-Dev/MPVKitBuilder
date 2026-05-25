@@ -44,6 +44,10 @@ enum ReportGenerator {
             let names = plan.skipExplicit.map(\.rawValue).joined(separator: ", ")
             lines.append("#   filtered out (only=/skip=): \(names)")
         }
+        if !plan.skipUnsupported.isEmpty {
+            let names = plan.skipUnsupported.map(\.rawValue).joined(separator: ", ")
+            lines.append("#   unsupported on requested platforms: \(names)")
+        }
         if !plan.forcedRebuild.isEmpty {
             let names = plan.forcedRebuild.map(\.rawValue).sorted().joined(separator: ", ")
             lines.append("#   forced rebuild: \(names)")
@@ -79,9 +83,9 @@ enum ReportGenerator {
                 args += FFmpegOptions.platformExtra(platform, arch)
                 // Show expected dependency flags for planned build (runtime availability not known yet)
                 for dep in ffmpegDeps {
-                    if options.enableGPL || dep != .libsmbclient {
-                        args.append("--enable-\(dep.rawValue)")
-                    }
+                    if !options.enableGPL && dep == .libsmbclient { continue }
+                    if dep.supportedPlatforms(from: [platform]).isEmpty { continue }
+                    args.append("--enable-\(dep.rawValue)")
                 }
                 if options.enableGPL { args.append("--enable-gpl") }
                 if options.enableDebug {

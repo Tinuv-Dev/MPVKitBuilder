@@ -129,7 +129,7 @@ class Builder {
     func postBuild(platform: PlatformType, arch: ArchType) throws {}
 
     func platforms() -> [PlatformType] {
-        ctx.options.platforms
+        lib.supportedPlatforms(from: ctx.options.platforms)
     }
 
     func architectures(for platform: PlatformType) -> [ArchType] {

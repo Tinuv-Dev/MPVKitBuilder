@@ -5,11 +5,6 @@ final class LibZvbiBuilder: AutoconfBuilder {
         super.init(lib: .libzvbi, context: context)
     }
 
-    // maccatalyst has linking issues with zvbi's internal socket usage
-    override func platforms() -> [PlatformType] {
-        super.platforms().filter { $0 != .maccatalyst }
-    }
-
     override func preCompile() throws {
         try super.preCompile()
         patchConfigureAC()
