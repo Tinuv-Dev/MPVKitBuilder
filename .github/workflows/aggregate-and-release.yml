@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       vulkan_run_id:
-        description: 'Run ID of the Prebuild Vulkan run whose artifact to consume (the number in the run URL).'
+        description: 'Run ID of the Prebuild Vulkan run whose artifact to consume (the number after /actions/runs/). A vulkan-prebuilt artifact ID or artifact URL is also accepted.'
         type: string
         required: true
       slice_run_ids:
@@ -31,21 +31,72 @@ jobs:
 
       - name: Download prebuilt vulkan
         env:
+          REPO: ${{ github.repository }}
+          VULKAN_INPUT: ${{ inputs.vulkan_run_id }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -e
+          set -euo pipefail
           mkdir -p vulkan-archive
-          ARTIFACT=$(gh run view "${{ inputs.vulkan_run_id }}" \
-            --repo "${{ github.repository }}" \
-            --json artifacts \
-            --jq '.artifacts[] | select(.name | startswith("vulkan-prebuilt-")) | .name' \
-            | head -n1)
+
+          input_id="${VULKAN_INPUT%/}"
+          case "$input_id" in
+            */actions/runs/*)
+              RUN_ID="${input_id#*/actions/runs/}"
+              RUN_ID="${RUN_ID%%/*}"
+              ARTIFACT_ID=""
+              ;;
+            */artifacts/*)
+              ARTIFACT_ID="${input_id#*/artifacts/}"
+              ARTIFACT_ID="${ARTIFACT_ID%%/*}"
+              RUN_ID=""
+              ;;
+            *)
+              RUN_ID="$input_id"
+              ARTIFACT_ID="$input_id"
+              ;;
+          esac
+
+          artifact_for_run() {
+            gh api "repos/$REPO/actions/runs/$1/artifacts?per_page=100" \
+              --jq '.artifacts[].name' 2>/dev/null \
+              | while IFS= read -r name; do
+                  case "$name" in
+                    vulkan-prebuilt-*)
+                      printf '%s\n' "$name"
+                      break
+                      ;;
+                  esac
+                done
+          }
+
+          ARTIFACT=""
+          if [ -n "$RUN_ID" ]; then
+            ARTIFACT=$(artifact_for_run "$RUN_ID" || true)
+          fi
+
+          if [ -z "$ARTIFACT" ] && [ -n "$ARTIFACT_ID" ]; then
+            ARTIFACT_INFO=$(gh api "repos/$REPO/actions/artifacts/$ARTIFACT_ID" \
+              --jq '[.workflow_run.id, .name] | @tsv' 2>/dev/null || true)
+            if [ -n "$ARTIFACT_INFO" ]; then
+              RESOLVED_RUN_ID="${ARTIFACT_INFO%%$'\t'*}"
+              RESOLVED_ARTIFACT="${ARTIFACT_INFO#*$'\t'}"
+              case "$RESOLVED_ARTIFACT" in
+                vulkan-prebuilt-*)
+                  RUN_ID="$RESOLVED_RUN_ID"
+                  ARTIFACT="$RESOLVED_ARTIFACT"
+                  echo "resolved artifact $ARTIFACT_ID to run $RUN_ID"
+                  ;;
+              esac
+            fi
+          fi
+
           if [ -z "$ARTIFACT" ]; then
-            echo "no vulkan-prebuilt-* artifact found on run ${{ inputs.vulkan_run_id }}"
+            echo "no vulkan-prebuilt-* artifact found for input $VULKAN_INPUT"
+            echo "Use the Prebuild Vulkan run ID from /actions/runs/<run_id>, or paste the vulkan-prebuilt artifact URL."
             exit 1
           fi
-          gh run download "${{ inputs.vulkan_run_id }}" \
-            --repo "${{ github.repository }}" \
+          gh run download "$RUN_ID" \
+            --repo "$REPO" \
             --name "$ARTIFACT" \
             --dir vulkan-archive
           tar -xJf vulkan-archive/vulkan-prebuilt.tar.xz
@@ -58,18 +109,30 @@ jobs:
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -e
+          set -euo pipefail
           mkdir -p slice-archives
+
+          artifact_for_run() {
+            prefix="$1"
+            run_id="$2"
+            gh api "repos/$REPO/actions/runs/$run_id/artifacts?per_page=100" \
+              --jq '.artifacts[].name' 2>/dev/null \
+              | while IFS= read -r name; do
+                  case "$name" in
+                    "$prefix"*)
+                      printf '%s\n' "$name"
+                      break
+                      ;;
+                  esac
+                done
+          }
+
           IFS=',' read -ra ENTRIES <<< "$PAIRS"
           for entry in "${ENTRIES[@]}"; do
             entry="${entry// /}"
             platform="${entry%%:*}"
             run_id="${entry##*:}"
-            artifact=$(gh run view "$run_id" \
-              --repo "$REPO" \
-              --json artifacts \
-              --jq ".artifacts[] | select(.name | startswith(\"slice-${platform}-\")) | .name" \
-              | head -n1)
+            artifact=$(artifact_for_run "slice-${platform}-" "$run_id" || true)
             if [ -z "$artifact" ]; then
               echo "no slice-${platform}-* artifact found on run $run_id"
               exit 1
