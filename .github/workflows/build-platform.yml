@@ -43,6 +43,13 @@ jobs:
         with:
           xcode-version: '16.2'
 
+      - name: Download platforms
+        run: |
+          sudo xcodebuild -runFirstLaunch
+          xcodebuild -downloadPlatform iOS
+          xcodebuild -downloadPlatform tvOS
+          xcodebuild -downloadPlatform visionOS
+
       - name: Free disk
         run: |
           sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes || true
