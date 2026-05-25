@@ -23,6 +23,7 @@ class CMakeBuilder: Builder {
             "-DCMAKE_INSTALL_LIBDIR=lib",
             "-DCMAKE_OSX_SYSROOT=\(platform.isysroot)",
             "-DCMAKE_OSX_ARCHITECTURES=\(arch.rawValue)",
+            "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         ]
 
         if platform != .maccatalyst {
