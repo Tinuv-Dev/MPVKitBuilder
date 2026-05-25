@@ -23,7 +23,6 @@ jobs:
 
       - name: Free disk (drop unused Xcodes)
         run: |
-          df -h /
           SELECTED=$(xcode-select -p)
           KEEP=$(dirname "$(dirname "$SELECTED")")
           echo "keeping $KEEP"
@@ -33,7 +32,6 @@ jobs:
               sudo rm -rf "$app"
             fi
           done
-          df -h /
 
       - name: First launch
         run: sudo xcodebuild -runFirstLaunch
