@@ -224,60 +224,67 @@ extension PackageManifestGenerator {
 extension PackageManifestGenerator {
     static func mpvKitDependencies(manifest: Manifest) -> [String] {
         let available = Set(manifest.targets)
-        var dependencies: [String] = []
+        let ffmpegNames = ffmpegDependencyTargetNames(manifest: manifest)
+        let ffmpegCovered = Set(ffmpegNames)
+        var dependencyNames: [String] = []
+        var seen: Set<String> = []
 
-        appendIfPresent("Libmpv", available: available, to: &dependencies)
-        if !ffmpegDependencies(manifest: manifest).isEmpty {
-            dependencies.append("\"_FFmpeg\"")
-        }
-        for name in ["Libuchardet", "Libbluray", "Libluajit"] {
-            appendIfPresent(name, available: available, to: &dependencies)
+        appendTargetNames(for: [.libmpv], available: available, to: &dependencyNames, seen: &seen)
+        if !ffmpegNames.isEmpty, seen.insert("_FFmpeg").inserted {
+            dependencyNames.append("_FFmpeg")
         }
 
-        return dependencies
+        let mpvLibraries = rootFirstLinkClosure(for: .libmpv)
+            .filter { $0 != .libmpv && $0 != .ffmpeg }
+        for name in frameworkTargetNames(for: mpvLibraries, available: available) where !ffmpegCovered.contains(name) {
+            appendDependencyName(name, to: &dependencyNames, seen: &seen)
+        }
+
+        return dependencyNames.map { "\"\($0)\"" }
     }
 
     static func ffmpegDependencies(manifest: Manifest) -> [String] {
-        let available = Set(manifest.targets)
-        let names = [
-            "Libavcodec",
-            "Libavdevice",
-            "Libavfilter",
-            "Libavformat",
-            "Libavutil",
-            "Libswresample",
-            "Libswscale",
-            "Libssl",
-            "Libcrypto",
-            "Libass",
-            "Libfreetype",
-            "Libfribidi",
-            "Libharfbuzz",
-            "MoltenVK",
-            "Libshaderc_combined",
-            "lcms2",
-            "Libplacebo",
-            "Libdovi",
-            "Libunibreak",
-            "gmp",
-            "nettle",
-            "hogweed",
-            "gnutls",
-            "Libdav1d",
-            "Libuavs3d",
-            "libsrt",
-            "libzvbi",
-            "libsmbclient",
-        ]
+        ffmpegDependencyTargetNames(manifest: manifest).map { "\"\($0)\"" }
+    }
 
-        return names.compactMap { name in
-            available.contains(name) ? "\"\(name)\"" : nil
+    static func ffmpegDependencyTargetNames(manifest: Manifest) -> [String] {
+        let available = Set(manifest.targets)
+        guard !frameworkTargetNames(for: [.ffmpeg], available: available).isEmpty else {
+            return []
+        }
+        return frameworkTargetNames(for: rootFirstLinkClosure(for: .ffmpeg), available: available)
+    }
+
+    static func rootFirstLinkClosure(for root: Library) -> [Library] {
+        let transitive = Set(LibraryDependency.transitiveDependencies(of: root))
+        let orderedDependencies = LibraryDependency.topologicalOrder()
+            .filter { transitive.contains($0) }
+        return [root] + orderedDependencies
+    }
+
+    static func frameworkTargetNames(for libraries: [Library], available: Set<String>) -> [String] {
+        var names: [String] = []
+        var seen: Set<String> = []
+        appendTargetNames(for: libraries, available: available, to: &names, seen: &seen)
+        return names
+    }
+
+    static func appendTargetNames(
+        for libraries: [Library],
+        available: Set<String>,
+        to names: inout [String],
+        seen: inout Set<String>
+    ) {
+        for library in libraries {
+            for framework in library.expectedFrameworks where available.contains(framework) {
+                appendDependencyName(framework, to: &names, seen: &seen)
+            }
         }
     }
 
-    static func appendIfPresent(_ name: String, available: Set<String>, to dependencies: inout [String]) {
-        if available.contains(name) {
-            dependencies.append("\"\(name)\"")
+    static func appendDependencyName(_ name: String, to names: inout [String], seen: inout Set<String>) {
+        if seen.insert(name).inserted {
+            names.append(name)
         }
     }
 
@@ -293,10 +300,19 @@ extension PackageManifestGenerator {
         [
             ".linkedFramework(\"AudioToolbox\")",
             ".linkedFramework(\"CoreVideo\")",
+            ".linkedFramework(\"CoreText\")",
             ".linkedFramework(\"CoreFoundation\")",
             ".linkedFramework(\"CoreMedia\")",
+            ".linkedFramework(\"CoreGraphics\")",
+            ".linkedFramework(\"Foundation\")",
+            ".linkedFramework(\"IOSurface\")",
             ".linkedFramework(\"Metal\")",
+            ".linkedFramework(\"QuartzCore\")",
             ".linkedFramework(\"Security\")",
+            ".linkedFramework(\"ApplicationServices\", .when(platforms: [.macOS, .macCatalyst]))",
+            ".linkedFramework(\"Cocoa\", .when(platforms: [.macOS]))",
+            ".linkedFramework(\"UIKit\", .when(platforms: [.iOS, .tvOS, .visionOS, .macCatalyst]))",
+            ".linkedFramework(\"IOKit\", .when(platforms: [.macOS, .iOS, .visionOS, .macCatalyst]))",
             ".linkedFramework(\"VideoToolbox\")",
             ".linkedLibrary(\"bz2\")",
             ".linkedLibrary(\"iconv\")",

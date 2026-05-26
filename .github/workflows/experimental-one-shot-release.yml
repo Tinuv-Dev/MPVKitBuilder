@@ -1,0 +1,536 @@
+name: Experimental One-Shot Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional tag/name for the GitHub Release. Defaults to MPVKit-YYYYMMDD-HHMM.
+        type: string
+        required: false
+      enable_gpl:
+        description: Enable GPL (includes libsmbclient)
+        type: boolean
+        default: false
+      extra_ffmpeg:
+        description: Extra FFmpeg configure args
+        type: string
+        required: false
+      macos:
+        description: Build macOS
+        type: boolean
+        default: false
+      ios:
+        description: Build iOS
+        type: boolean
+        default: true
+      isimulator:
+        description: Build iOS Simulator
+        type: boolean
+        default: true
+      tvos:
+        description: Build tvOS
+        type: boolean
+        default: false
+      tvsimulator:
+        description: Build tvOS Simulator
+        type: boolean
+        default: false
+      xros:
+        description: Build visionOS
+        type: boolean
+        default: false
+      xrsimulator:
+        description: Build visionOS Simulator
+        type: boolean
+        default: false
+      maccatalyst:
+        description: Build Mac Catalyst
+        type: boolean
+        default: false
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: experimental-one-shot-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: prepare platform matrix
+    runs-on: ubuntu-latest
+    outputs:
+      platforms: ${{ steps.platforms.outputs.platforms }}
+      platform_csv: ${{ steps.platforms.outputs.platform_csv }}
+      vulkan_platform_csv: ${{ steps.platforms.outputs.vulkan_platform_csv }}
+      has_vulkan_platforms: ${{ steps.platforms.outputs.has_vulkan_platforms }}
+    steps:
+      - name: Resolve selected platforms
+        id: platforms
+        run: |
+          set -euo pipefail
+
+          platforms=()
+          vulkan_platforms=()
+
+          add_platform() {
+            if [ "$1" = "true" ]; then
+              platforms+=("$2")
+              if [ "$2" != "maccatalyst" ]; then
+                vulkan_platforms+=("$2")
+              fi
+            fi
+          }
+
+          add_platform "${{ inputs.macos }}" macos
+          add_platform "${{ inputs.ios }}" ios
+          add_platform "${{ inputs.isimulator }}" isimulator
+          add_platform "${{ inputs.tvos }}" tvos
+          add_platform "${{ inputs.tvsimulator }}" tvsimulator
+          add_platform "${{ inputs.xros }}" xros
+          add_platform "${{ inputs.xrsimulator }}" xrsimulator
+          add_platform "${{ inputs.maccatalyst }}" maccatalyst
+
+          if [ "${#platforms[@]}" -eq 0 ]; then
+            echo "Select at least one platform."
+            exit 1
+          fi
+
+          json="["
+          csv=""
+          for platform in "${platforms[@]}"; do
+            if [ "$json" != "[" ]; then
+              json+=","
+              csv+=","
+            fi
+            json+="\"$platform\""
+            csv+="$platform"
+          done
+          json+="]"
+
+          vulkan_csv=""
+          for platform in "${vulkan_platforms[@]}"; do
+            if [ -n "$vulkan_csv" ]; then
+              vulkan_csv+=","
+            fi
+            vulkan_csv+="$platform"
+          done
+
+          has_vulkan=false
+          if [ -n "$vulkan_csv" ]; then
+            has_vulkan=true
+          fi
+
+          echo "platforms=$json" >> "$GITHUB_OUTPUT"
+          echo "platform_csv=$csv" >> "$GITHUB_OUTPUT"
+          echo "vulkan_platform_csv=$vulkan_csv" >> "$GITHUB_OUTPUT"
+          echo "has_vulkan_platforms=$has_vulkan" >> "$GITHUB_OUTPUT"
+          echo "Selected platforms: $csv"
+          echo "Vulkan platforms: ${vulkan_csv:-<headers only>}"
+
+  vulkan:
+    name: build vulkan prebuilt
+    needs: prepare
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.2'
+
+      - name: Free disk (drop unused Xcodes)
+        run: |
+          SELECTED=$(xcode-select -p)
+          KEEP=$(dirname "$(dirname "$SELECTED")")
+          echo "keeping $KEEP"
+          for app in /Applications/Xcode*.app; do
+            if [ "$app" != "$KEEP" ]; then
+              echo "removing $app"
+              sudo rm -rf "$app"
+            fi
+          done
+
+      - name: Export selected Xcode
+        run: |
+          DEVELOPER_DIR=$(xcode-select -p)
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR"
+          xcodebuild -version
+
+      - name: First launch
+        run: |
+          sudo xcodebuild -runFirstLaunch
+          xcodebuild -checkFirstLaunchStatus
+          xcrun --kill-cache
+
+      - name: Probe SDKs
+        run: |
+          xcodebuild -showsdks
+          for sdk in iphoneos iphonesimulator appletvos appletvsimulator xros xrsimulator; do
+            echo "== $sdk =="
+            xcrun --no-cache --sdk "$sdk" --show-sdk-path
+            xcrun --no-cache --sdk "$sdk" --show-sdk-platform-path
+          done
+
+      - name: Install build tools
+        run: |
+          brew update
+          brew install cmake meson ninja pkg-config autoconf automake libtool
+
+      - name: Build MoltenVK
+        if: needs.prepare.outputs.has_vulkan_platforms == 'true'
+        run: |
+          set +e
+          swift run --package-path . MPVKitBuilder build \
+            only=vulkan \
+            platform=${{ needs.prepare.outputs.vulkan_platform_csv }} \
+            disable-package \
+            verbose
+          STATUS=$?
+
+          if [ "$STATUS" -eq 0 ]; then
+            exit 0
+          fi
+
+          LOG=.build/reports/log/vulkan.log
+          if [ -f "$LOG" ] && grep -Eq "Unable to find a destination matching|is not installed" "$LOG"; then
+            echo "Xcode destination/platform registry looks broken; downloading platform components and retrying."
+            xcrun --kill-cache
+            for platform in iOS tvOS visionOS; do
+              xcodebuild -downloadPlatform "$platform"
+            done
+            xcrun --kill-cache
+
+            swift run --package-path . MPVKitBuilder build \
+              only=vulkan \
+              platform=${{ needs.prepare.outputs.vulkan_platform_csv }} \
+              disable-package \
+              verbose
+            exit $?
+          fi
+
+          exit "$STATUS"
+
+      - name: Stage prebuilt Vulkan bundle
+        run: |
+          set -euo pipefail
+          mkdir -p prebuilt-vulkan
+
+          if [ "${{ needs.prepare.outputs.has_vulkan_platforms }}" = "true" ]; then
+            cp -R dist/MoltenVK.xcframework prebuilt-vulkan/
+
+            INCLUDE=$(ls -d build/vulkan-source-*/Package/Release/MoltenVK/include | head -n1)
+            if [ -z "$INCLUDE" ]; then
+              echo "could not locate MoltenVK include directory under build/"
+              exit 1
+            fi
+            cp -R "$INCLUDE" prebuilt-vulkan/include
+
+            REGISTRY=$(ls -d build/vulkan-source-*/External/Vulkan-Headers/registry/vk.xml | head -n1)
+            if [ -z "$REGISTRY" ]; then
+              echo "could not locate Vulkan registry vk.xml under build/"
+              exit 1
+            fi
+            mkdir -p prebuilt-vulkan/share/vulkan/registry
+            cp "$REGISTRY" prebuilt-vulkan/share/vulkan/registry/vk.xml
+          else
+            VULKAN_HEADERS_TAG=v1.3.296
+            ARCHIVE="$RUNNER_TEMP/vulkan-headers.tar.gz"
+            EXTRACT="$RUNNER_TEMP/vulkan-headers"
+            curl -fL --retry 3 --connect-timeout 30 \
+              -o "$ARCHIVE" \
+              "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/${VULKAN_HEADERS_TAG}.tar.gz"
+            mkdir -p "$EXTRACT" prebuilt-vulkan/include prebuilt-vulkan/share/vulkan/registry
+            tar -xzf "$ARCHIVE" -C "$EXTRACT" --strip-components=1
+            cp -R "$EXTRACT/include/vulkan" prebuilt-vulkan/include/
+            cp "$EXTRACT/registry/vk.xml" prebuilt-vulkan/share/vulkan/registry/vk.xml
+          fi
+
+          test -f prebuilt-vulkan/include/vulkan/vulkan.h
+          test -s prebuilt-vulkan/share/vulkan/registry/vk.xml
+          du -sh prebuilt-vulkan
+          tar -cJf vulkan-prebuilt.tar.xz prebuilt-vulkan
+          ls -lh vulkan-prebuilt.tar.xz
+
+      - name: Upload prebuilt Vulkan
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulkan-prebuilt
+          path: vulkan-prebuilt.tar.xz
+          retention-days: 3
+
+      - name: Upload Vulkan reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulkan-reports
+          path: .build/reports
+          retention-days: 3
+
+  build:
+    name: build ${{ matrix.platform }}
+    needs:
+      - prepare
+      - vulkan
+    runs-on: macos-15
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        platform: ${{ fromJSON(needs.prepare.outputs.platforms) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.2'
+
+      - name: Free disk (drop unused Xcodes)
+        run: |
+          SELECTED=$(xcode-select -p)
+          KEEP=$(dirname "$(dirname "$SELECTED")")
+          echo "keeping $KEEP"
+          for app in /Applications/Xcode*.app; do
+            if [ "$app" != "$KEEP" ]; then
+              echo "removing $app"
+              sudo rm -rf "$app"
+            fi
+          done
+
+      - name: Export selected Xcode
+        run: |
+          DEVELOPER_DIR=$(xcode-select -p)
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR"
+          xcodebuild -version
+
+      - name: First launch
+        run: |
+          sudo xcodebuild -runFirstLaunch
+          xcodebuild -checkFirstLaunchStatus
+          xcrun --kill-cache
+
+      - name: Probe SDKs
+        run: |
+          xcodebuild -showsdks
+          for sdk in iphoneos iphonesimulator appletvos appletvsimulator xros xrsimulator; do
+            echo "== $sdk =="
+            xcrun --no-cache --sdk "$sdk" --show-sdk-path
+            xcrun --no-cache --sdk "$sdk" --show-sdk-platform-path
+          done
+
+      - name: Ensure selected platform components
+        run: |
+          case "${{ matrix.platform }}" in
+            ios|isimulator)
+              PLATFORM=iOS
+              SDKS="iphoneos iphonesimulator"
+              ;;
+            tvos|tvsimulator)
+              PLATFORM=tvOS
+              SDKS="appletvos appletvsimulator"
+              ;;
+            xros|xrsimulator)
+              PLATFORM=visionOS
+              SDKS="xros xrsimulator"
+              ;;
+            *)
+              echo "No downloadable platform component needed for ${{ matrix.platform }}"
+              exit 0
+              ;;
+          esac
+          NEED_DOWNLOAD=0
+          for sdk in $SDKS; do
+            echo "checking $sdk"
+            xcrun --no-cache --sdk "$sdk" --show-sdk-path || NEED_DOWNLOAD=1
+            xcrun --no-cache --sdk "$sdk" --show-sdk-platform-path || NEED_DOWNLOAD=1
+          done
+          if [ "$NEED_DOWNLOAD" -eq 1 ]; then
+            echo "Downloading $PLATFORM platform components"
+            xcrun --kill-cache
+            xcodebuild -downloadPlatform "$PLATFORM"
+            xcrun --kill-cache
+          fi
+
+      - name: Install build tools
+        run: |
+          brew update
+          brew install cmake meson ninja nasm pkg-config autoconf automake libtool python-setuptools cpanminus
+          cpanm Parse::Yapp
+          python3 -m pip install jinja2 --break-system-packages
+
+      - name: Download prebuilt Vulkan
+        uses: actions/download-artifact@v4
+        with:
+          name: vulkan-prebuilt
+          path: vulkan-archive
+
+      - name: Unpack prebuilt Vulkan
+        run: |
+          set -euo pipefail
+          tar -xJf vulkan-archive/vulkan-prebuilt.tar.xz
+          test -f prebuilt-vulkan/include/vulkan/vulkan.h
+          test -s prebuilt-vulkan/share/vulkan/registry/vk.xml
+
+      - name: Build platform
+        env:
+          PREBUILT_VULKAN: ${{ github.workspace }}/prebuilt-vulkan
+        run: |
+          set -x
+          ARGS=(
+            platform=${{ matrix.platform }}
+            split-platform
+            clean-after-lib
+            verbose
+            skip=libdovi
+            prebuilt-vulkan=$PREBUILT_VULKAN
+          )
+          if [ "${{ inputs.enable_gpl }}" = "true" ]; then
+            ARGS+=(enable-gpl)
+          else
+            ARGS+=(disable-gpl)
+          fi
+          if [ -n "${{ inputs.extra_ffmpeg }}" ]; then
+            ARGS+=("extra-ffmpeg=${{ inputs.extra_ffmpeg }}")
+          fi
+          swift run --package-path . MPVKitBuilder build "${ARGS[@]}"
+
+      - name: Disk after build
+        if: always()
+        run: |
+          df -h
+          du -sh build dist dist-platform 2>/dev/null || true
+
+      - name: Stage slice
+        run: |
+          ls dist-platform
+          du -sh dist-platform/${{ matrix.platform }}
+          tar -cJf slice-${{ matrix.platform }}.tar.xz -C dist-platform ${{ matrix.platform }}
+          ls -lh slice-${{ matrix.platform }}.tar.xz
+
+      - name: Upload slice
+        uses: actions/upload-artifact@v4
+        with:
+          name: slice-${{ matrix.platform }}
+          path: slice-${{ matrix.platform }}.tar.xz
+          retention-days: 3
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ matrix.platform }}
+          path: .build/reports
+          retention-days: 3
+
+  aggregate:
+    name: aggregate and release
+    needs:
+      - prepare
+      - vulkan
+      - build
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.2'
+
+      - name: Download prebuilt Vulkan
+        uses: actions/download-artifact@v4
+        with:
+          name: vulkan-prebuilt
+          path: vulkan-archive
+
+      - name: Unpack prebuilt Vulkan
+        run: |
+          set -euo pipefail
+          tar -xJf vulkan-archive/vulkan-prebuilt.tar.xz
+          mkdir -p dist-platform
+          if [ -d prebuilt-vulkan/MoltenVK.xcframework ]; then
+            cp -R prebuilt-vulkan/MoltenVK.xcframework dist-platform/
+          fi
+
+      - name: Download platform slices
+        uses: actions/download-artifact@v4
+        with:
+          pattern: slice-*
+          path: slice-archives
+          merge-multiple: false
+
+      - name: Unpack platform slices
+        run: |
+          set -euo pipefail
+          for tar in slice-archives/*/slice-*.tar.xz; do
+            tar -xJf "$tar" -C dist-platform
+          done
+          ls dist-platform
+
+      - name: Assemble xcframeworks
+        run: swift run --package-path . MPVKitBuilder assemble
+
+      - name: Resolve release metadata
+        env:
+          SELECTED_PLATFORMS: ${{ needs.prepare.outputs.platform_csv }}
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          stamp=$(TZ=Asia/Shanghai date +%Y%m%d-%H%M)
+          if [ -n "$TAG_INPUT" ]; then
+            release_tag="$TAG_INPUT"
+            safe_tag="${TAG_INPUT//\//-}"
+            safe_tag="${safe_tag// /-}"
+            bundle_name="MPVKit-${safe_tag}-${stamp}"
+          else
+            release_tag="MPVKit-${stamp}"
+            bundle_name="$release_tag"
+          fi
+
+          echo "RELEASE_STAMP=$stamp" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$release_tag" >> "$GITHUB_ENV"
+          echo "BUNDLE_NAME=$bundle_name" >> "$GITHUB_ENV"
+          echo "PACKAGE_PLATFORMS=$SELECTED_PLATFORMS" >> "$GITHUB_ENV"
+          echo "release tag: $release_tag"
+          echo "bundle name: $bundle_name"
+          echo "package platforms: $SELECTED_PLATFORMS"
+
+      - name: Generate Package.swift
+        run: swift run --package-path . MPVKitBuilder package "package-platforms=$PACKAGE_PLATFORMS"
+
+      - name: Validate generated Package.swift
+        run: swift package dump-package --package-path dist
+
+      - name: Show dist
+        run: |
+          ls -lh dist
+          du -sh dist/*.xcframework | sort -h
+
+      - name: Pack final bundle
+        run: |
+          tar -cJf "$BUNDLE_NAME.tar.xz" -C dist .
+          ls -lh "$BUNDLE_NAME.tar.xz"
+
+      - name: Upload aggregated artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BUNDLE_NAME }}
+          path: ${{ env.BUNDLE_NAME }}.tar.xz
+          retention-days: 7
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
+          files: ${{ env.BUNDLE_NAME }}.tar.xz
+          generate_release_notes: true
