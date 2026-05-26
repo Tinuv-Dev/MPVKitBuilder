@@ -35,6 +35,7 @@ struct BuildOptions {
     var skip: Set<Library> = []
     var ffmpegExtraArgs: [String] = []
     var generatePackage: Bool = true
+    var packagePlatforms: [PlatformType]?
     var verboseOutput: Bool = false
 
     /// Optional path to a prebuilt MoltenVK bundle. The bundle is expected to be a directory
@@ -121,13 +122,9 @@ extension BuildOptions {
     static func applyKeyValue(key: String, value: String, into opt: inout BuildOptions) throws {
         switch key {
         case "platform":
-            let list = value.split(separator: ",").map(String.init)
-            opt.platforms = try list.map {
-                guard let p = PlatformType(rawValue: $0) else {
-                    throw BuildError.invalidArgument("unknown platform '\($0)'")
-                }
-                return p
-            }
+            opt.platforms = try parsePlatformList(value)
+        case "package-platform", "package-platforms":
+            opt.packagePlatforms = try parsePlatformList(value)
         case "arch", "architecture":
             opt.architectures = Set(try parseArchitectureList(value))
         case "only":
@@ -165,6 +162,20 @@ extension BuildOptions {
                 throw BuildError.invalidArgument("unknown library '\(name)'")
             }
             return lib
+        }
+    }
+
+    static func parsePlatformList(_ value: String) throws -> [PlatformType] {
+        let names = value.split(separator: ",")
+        guard !names.isEmpty else {
+            throw BuildError.invalidArgument("empty platform list")
+        }
+        return try names.map {
+            let name = String($0)
+            guard let platform = PlatformType.parse(name) else {
+                throw BuildError.invalidArgument("unknown platform '\(name)'")
+            }
+            return platform
         }
     }
 

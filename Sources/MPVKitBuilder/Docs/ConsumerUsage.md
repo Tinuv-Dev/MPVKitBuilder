@@ -15,6 +15,12 @@ swift run --package-path . MPVKitBuilder package
 make package
 ```
 
+如需只声明本次产物实际支持的平台，可以传入构建平台列表：
+
+```bash
+swift run --package-path . MPVKitBuilder package package-platforms=ios,isimulator
+```
+
 ## 2. 在其它 SwiftPM 工程中引用
 
 `dist/Package.swift` 是一个完整的本地 Package，主 product 名为 `MPVKit`。在你的应用工程里：
@@ -94,5 +100,5 @@ mpv_terminate_destroy(h)
 
 ## 5. 已知约束
 
-- 当前生成的 `platforms:` 固定为 `macOS 10.15 / iOS 13 / tvOS 13 / visionOS 1.0`。若 `dist/` 中某些 xcframework 缺少对应平台 slice，消费方在该平台上编译会报错；按需重新构建对应平台即可。
+- 生成的 `platforms:` 会根据 `platform=` 或 `package-platforms=` 归一化声明，例如 `ios,isimulator` 会声明为 `iOS 13`。若 `dist/` 中某些 xcframework 缺少对应平台 slice，消费方在该平台上编译会报错；按需重新构建对应平台即可。
 - 远程 `.binaryTarget(url:checksum:)` 模式暂未实现，第一版只支持本地 `path:` 引用。

@@ -16,6 +16,25 @@ extension PlatformType {
         [.macos, .ios, .isimulator, .tvos, .tvsimulator, .xros, .xrsimulator, .maccatalyst]
     }
 
+    static func parse(_ value: String) -> PlatformType? {
+        let normalized = value
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+
+        switch normalized {
+        case "macos": return .macos
+        case "ios": return .ios
+        case "isimulator", "iossim", "iossimulator": return .isimulator
+        case "tvos": return .tvos
+        case "tvsimulator", "tvossim", "tvossimulator": return .tvsimulator
+        case "xros", "visionos": return .xros
+        case "xrsimulator", "visionossim", "visionossimulator": return .xrsimulator
+        case "maccatalyst", "maccat": return .maccatalyst
+        default: return nil
+        }
+    }
+
     var minVersion: String {
         switch self {
         case .ios, .isimulator:       return "13.0"

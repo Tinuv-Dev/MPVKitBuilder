@@ -158,7 +158,11 @@ extension BuildPipeline {
         if options.generatePackage {
             logger.section("Package manifest")
             do {
-                try PackageManifestGenerator.write(distDirectory: options.distDirectory, logger: logger)
+                try PackageManifestGenerator.write(
+                    distDirectory: options.distDirectory,
+                    platforms: options.packagePlatforms ?? options.platforms,
+                    logger: logger
+                )
             } catch {
                 // The build itself succeeded; manifest generation failure is non-fatal.
                 logger.write(.warn, "  failed to generate dist/Package.swift: \(error)")
@@ -168,7 +172,11 @@ extension BuildPipeline {
 
     static func generatePackageManifest(options: BuildOptions, logger: BuildLogger) throws {
         logger.section("Package manifest")
-        try PackageManifestGenerator.write(distDirectory: options.distDirectory, logger: logger)
+        try PackageManifestGenerator.write(
+            distDirectory: options.distDirectory,
+            platforms: options.packagePlatforms ?? options.platforms,
+            logger: logger
+        )
     }
 }
 

@@ -11,10 +11,18 @@ on:
         description: 'Comma-separated list of "platform:run_id" pairs (e.g. "ios:1234567890,macos:1234567891"). Each platform is fetched from the matching Build Platform run.'
         type: string
         required: true
-      tag:
-        description: 'Optional tag/name for the GitHub Release (leave blank to skip release publish)'
+      package_platforms:
+        description: 'Optional comma-separated platform list for generated Package.swift. Defaults to the platforms in slice_run_ids.'
         type: string
         required: false
+      tag:
+        description: 'Optional tag/name for the GitHub Release. Defaults to mpvkit-YYYYMMDD-HHMM.'
+        type: string
+        required: false
+
+permissions:
+  actions: read
+  contents: write
 
 jobs:
   aggregate:
@@ -156,6 +164,56 @@ jobs:
       - name: Assemble xcframeworks
         run: swift run --package-path . MPVKitBuilder assemble
 
+      - name: Resolve release metadata
+        env:
+          PAIRS: ${{ inputs.slice_run_ids }}
+          PACKAGE_PLATFORMS_INPUT: ${{ inputs.package_platforms }}
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          stamp=$(TZ=Asia/Shanghai date +%Y%m%d-%H%M)
+          if [ -n "$TAG_INPUT" ]; then
+            release_tag="$TAG_INPUT"
+            safe_tag="${TAG_INPUT//\//-}"
+            safe_tag="${safe_tag// /-}"
+            bundle_name="mpvkit-${safe_tag}-${stamp}"
+          else
+            release_tag="mpvkit-${stamp}"
+            bundle_name="$release_tag"
+          fi
+
+          if [ -n "$PACKAGE_PLATFORMS_INPUT" ]; then
+            package_platforms="${PACKAGE_PLATFORMS_INPUT// /}"
+          else
+            platforms=()
+            IFS=',' read -ra ENTRIES <<< "$PAIRS"
+            for entry in "${ENTRIES[@]}"; do
+              entry="${entry// /}"
+              if [ -z "$entry" ]; then
+                continue
+              fi
+              platforms+=("${entry%%:*}")
+            done
+            package_platforms=$(IFS=','; echo "${platforms[*]}")
+          fi
+
+          if [ -z "$package_platforms" ]; then
+            echo "no package platforms resolved"
+            exit 1
+          fi
+
+          echo "RELEASE_STAMP=$stamp" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$release_tag" >> "$GITHUB_ENV"
+          echo "BUNDLE_NAME=$bundle_name" >> "$GITHUB_ENV"
+          echo "PACKAGE_PLATFORMS=$package_platforms" >> "$GITHUB_ENV"
+          echo "release tag: $release_tag"
+          echo "bundle name: $bundle_name"
+          echo "package platforms: $package_platforms"
+
+      - name: Generate Package.swift
+        run: swift run --package-path . MPVKitBuilder package "package-platforms=$PACKAGE_PLATFORMS"
+
       - name: Show dist
         run: |
           ls -lh dist
@@ -163,21 +221,20 @@ jobs:
 
       - name: Pack final bundle
         run: |
-          tar -cJf mpvkit-${{ inputs.tag || github.run_number }}.tar.xz -C dist .
-          ls -lh mpvkit-*.tar.xz
+          tar -cJf "$BUNDLE_NAME.tar.xz" -C dist .
+          ls -lh "$BUNDLE_NAME.tar.xz"
 
       - name: Upload aggregated artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mpvkit-${{ inputs.tag || github.run_number }}
-          path: mpvkit-${{ inputs.tag || github.run_number }}.tar.xz
+          name: ${{ env.BUNDLE_NAME }}
+          path: ${{ env.BUNDLE_NAME }}.tar.xz
           retention-days: 7
 
       - name: Publish GitHub Release
-        if: ${{ inputs.tag != '' }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag }}
-          name: ${{ inputs.tag }}
-          files: mpvkit-*.tar.xz
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
+          files: ${{ env.BUNDLE_NAME }}.tar.xz
           generate_release_notes: true
