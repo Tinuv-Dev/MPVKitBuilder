@@ -115,7 +115,7 @@ jobs:
       - name: Install build tools
         run: |
           brew update
-          brew install cmake meson ninja nasm pkg-config autoconf automake libtool
+          brew install cmake meson ninja nasm pkg-config autoconf automake libtool python-setuptools
 
       - name: Download prebuilt vulkan
         env:
