@@ -106,6 +106,7 @@ jobs:
           brew update
           brew install cmake meson ninja nasm pkg-config autoconf automake libtool python-setuptools cpanminus
           cpanm Parse::Yapp
+          python3 -m pip install jinja2 --break-system-packages
       - name: Download prebuilt vulkan
         env:
           REPO: ${{ github.repository }}
