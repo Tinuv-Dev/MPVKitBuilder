@@ -38,7 +38,8 @@ struct BuildOptions {
     var verboseOutput: Bool = false
 
     /// Optional path to a prebuilt MoltenVK bundle. The bundle is expected to be a directory
-    /// containing `MoltenVK.xcframework/` and `include/` (with `vulkan/`, `vk_video/`, `MoltenVK/`).
+    /// containing `MoltenVK.xcframework/`, `include/` (with `vulkan/`, `vk_video/`, `MoltenVK/`),
+    /// and `share/vulkan/registry/vk.xml` for libplacebo's Vulkan code generator.
     /// When set, LibVulkanBuilder skips fetchDependencies/make and just writes vulkan.pc files
     /// for downstream consumers (libplacebo, ffmpeg) and copies the xcframework through.
     var prebuiltVulkanDir: URL?

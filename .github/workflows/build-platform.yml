@@ -177,6 +177,23 @@ jobs:
           tar -xJf prebuilt-vulkan-archive/vulkan-prebuilt.tar.xz
           ls prebuilt-vulkan
           ls prebuilt-vulkan/MoltenVK.xcframework
+          if [ ! -f prebuilt-vulkan/share/vulkan/registry/vk.xml ]; then
+            echo "prebuilt Vulkan artifact is missing share/vulkan/registry/vk.xml"
+            mkdir -p prebuilt-vulkan/share/vulkan/registry
+            BUNDLED_REGISTRY=Sources/MPVKitBuilder/Resources/VulkanRegistry/vk.xml
+            if [ -f "$BUNDLED_REGISTRY" ]; then
+              echo "using bundled $BUNDLED_REGISTRY"
+              cp "$BUNDLED_REGISTRY" prebuilt-vulkan/share/vulkan/registry/vk.xml
+            else
+              VULKAN_HEADERS_TAG=v1.3.296
+              echo "downloading Vulkan-Headers $VULKAN_HEADERS_TAG registry"
+              curl -fL --retry 3 --connect-timeout 30 \
+                -o prebuilt-vulkan/share/vulkan/registry/vk.xml \
+                "https://raw.githubusercontent.com/KhronosGroup/Vulkan-Headers/$VULKAN_HEADERS_TAG/registry/vk.xml"
+            fi
+          fi
+          test -s prebuilt-vulkan/share/vulkan/registry/vk.xml
+          ls prebuilt-vulkan/share/vulkan/registry/vk.xml
       - name: Build platform
         env:
           PREBUILT_VULKAN: ${{ github.workspace }}/prebuilt-vulkan

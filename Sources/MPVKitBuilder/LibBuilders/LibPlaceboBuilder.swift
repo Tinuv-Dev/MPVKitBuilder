@@ -90,8 +90,6 @@ final class LibPlaceboBuilder: MesonBuilder {
     }
 
     override func mesonExtraSetupArguments(platform: PlatformType, arch: ArchType, buildDirectory: URL) throws -> [String] {
-        let vkXml = ctx.sourceDir(.vulkan)
-            .appendingPathComponent("External/Vulkan-Headers/registry/vk.xml")
         var args = [
             "-Dxxhash=disabled",
             "-Dopengl=disabled",
@@ -99,6 +97,7 @@ final class LibPlaceboBuilder: MesonBuilder {
             "-Ddemos=false",
         ]
         if vulkanIsSupported(on: platform) {
+            let vkXml = try vulkanRegistryPath()
             args.append("-Dvulkan=enabled")
             args.append("-Dvulkan-registry=\(vkXml.path)")
         } else {
@@ -110,6 +109,31 @@ final class LibPlaceboBuilder: MesonBuilder {
 
     func vulkanIsSupported(on platform: PlatformType) -> Bool {
         Library.vulkan.supportedPlatforms(from: [platform]).contains(platform)
+    }
+
+    func vulkanRegistryPath() throws -> URL {
+        let sourceRegistry = ctx.sourceDir(.vulkan)
+            .appendingPathComponent("External/Vulkan-Headers/registry/vk.xml")
+
+        if let prebuilt = ctx.options.prebuiltVulkanDir {
+            let prebuiltRegistry = prebuilt.appendingPathComponent("share/vulkan/registry/vk.xml")
+            if FileManager.default.fileExists(atPath: prebuiltRegistry.path) {
+                return prebuiltRegistry
+            }
+            if FileManager.default.fileExists(atPath: sourceRegistry.path) {
+                return sourceRegistry
+            }
+            throw BuildError.unexpected("""
+            missing Vulkan registry vk.xml for libplacebo. Expected it in the prebuilt bundle at \
+            \(prebuiltRegistry.path). Add share/vulkan/registry/vk.xml to the prebuilt bundle \
+            before invoking the builder.
+            """)
+        }
+
+        guard FileManager.default.fileExists(atPath: sourceRegistry.path) else {
+            throw BuildError.unexpected("missing Vulkan registry vk.xml: \(sourceRegistry.path)")
+        }
+        return sourceRegistry
     }
 
     func patchVulkanMesonBuild() {

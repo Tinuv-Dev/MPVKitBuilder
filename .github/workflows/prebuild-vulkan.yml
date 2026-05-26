@@ -106,9 +106,18 @@ jobs:
           fi
           cp -R "$INCLUDE" prebuilt-vulkan/include
 
+          REGISTRY=$(ls -d build/vulkan-source-*/External/Vulkan-Headers/registry/vk.xml | head -n1)
+          if [ -z "$REGISTRY" ]; then
+            echo "could not locate Vulkan registry vk.xml under build/"
+            exit 1
+          fi
+          mkdir -p prebuilt-vulkan/share/vulkan/registry
+          cp "$REGISTRY" prebuilt-vulkan/share/vulkan/registry/vk.xml
+
           du -sh prebuilt-vulkan
           ls prebuilt-vulkan/MoltenVK.xcframework
           ls prebuilt-vulkan/include
+          ls prebuilt-vulkan/share/vulkan/registry/vk.xml
           tar -cJf vulkan-prebuilt.tar.xz prebuilt-vulkan
           ls -lh vulkan-prebuilt.tar.xz
 

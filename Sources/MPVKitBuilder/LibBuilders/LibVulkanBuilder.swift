@@ -130,6 +130,13 @@ extension LibVulkanBuilder {
         guard FileManager.default.fileExists(atPath: includeDir.path) else {
             throw BuildError.unexpected("prebuilt vulkan dir missing include/: \(includeDir.path)")
         }
+        let registry = prebuiltVulkanRegistry(prebuiltDir: prebuiltDir)
+        guard FileManager.default.fileExists(atPath: registry.path) else {
+            throw BuildError.unexpected("""
+            prebuilt vulkan dir missing Vulkan registry vk.xml: \(registry.path). \
+            Add share/vulkan/registry/vk.xml to the prebuilt bundle before invoking the builder.
+            """)
+        }
 
         for platform in platforms() {
             // The prebuilt xcframework must contain a slice that matches each target platform.
@@ -185,6 +192,10 @@ extension LibVulkanBuilder {
         try removeIfExists(dst)
         try FileManager.default.copyItem(at: source, to: dst)
         ctx.logger.step("mirrored MoltenVK.xcframework to \(dst.path)")
+    }
+
+    func prebuiltVulkanRegistry(prebuiltDir: URL) -> URL {
+        prebuiltDir.appendingPathComponent("share/vulkan/registry/vk.xml")
     }
 }
 
