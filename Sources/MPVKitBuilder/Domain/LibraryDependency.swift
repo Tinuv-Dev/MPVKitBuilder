@@ -25,7 +25,7 @@ enum LibraryDependency {
         .libdovi:      [],
         .libluajit:    [],
         .ffmpeg:       [.openssl, .libass, .libsmbclient, .vulkan, .libshaderc, .lcms2,
-                        .libplacebo, .libdav1d, .libuavs3d, .libdovi, .libbluray, .libsrt, .libzvbi],
+                        .libplacebo, .libdav1d, .libuavs3d, .libbluray, .libsrt, .libzvbi],
         .libmpv:       [.ffmpeg, .libass, .libplacebo, .libuchardet, .libluajit, .libbluray],
     ]
 

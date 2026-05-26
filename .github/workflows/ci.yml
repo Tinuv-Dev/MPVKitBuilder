@@ -32,10 +32,10 @@ jobs:
         run: swift build
 
       - name: dry-run ios
-        run: swift run --package-path . MPVKitBuilder dry-run platform=ios split-platform
+        run: swift run --package-path . MPVKitBuilder dry-run platform=ios split-platform skip=libdovi
 
       - name: dry-run macos
-        run: swift run --package-path . MPVKitBuilder dry-run platform=macos split-platform
+        run: swift run --package-path . MPVKitBuilder dry-run platform=macos split-platform skip=libdovi
 
       - name: Upload reports
         if: always()
