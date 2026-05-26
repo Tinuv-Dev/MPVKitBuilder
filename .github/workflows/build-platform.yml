@@ -107,6 +107,33 @@ jobs:
           brew install cmake meson ninja nasm pkg-config autoconf automake libtool python-setuptools cpanminus
           cpanm Parse::Yapp
           python3 -m pip install jinja2 --break-system-packages
+      - name: Install Rust build tools
+        if: ${{ inputs.platform == 'macos' || inputs.platform == 'ios' || inputs.platform == 'isimulator' }}
+        run: |
+          set -euo pipefail
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          fi
+
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add \
+            aarch64-apple-darwin \
+            x86_64-apple-darwin \
+            aarch64-apple-ios \
+            aarch64-apple-ios-sim \
+            x86_64-apple-ios
+
+          if ! command -v cargo-cinstall >/dev/null 2>&1; then
+            cargo install cargo-c --locked
+          fi
+
+          cargo --version
+          rustup --version
+          cargo cinstall --version
       - name: Download prebuilt vulkan
         env:
           REPO: ${{ github.repository }}
