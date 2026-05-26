@@ -18,9 +18,11 @@ final class LibPlaceboBuilder: MesonBuilder {
     override func cFlags(platform: PlatformType, arch: ArchType) -> [String] {
         var flags = super.cFlags(platform: platform, arch: arch)
         if !vulkanIsSupported(on: platform) {
-            let include = ctx.sourceDir(.vulkan)
-                .appendingPathComponent("Package/Release/MoltenVK/include")
-            if FileManager.default.fileExists(atPath: include.path) {
+            let includes = [
+                ctx.options.prebuiltVulkanDir?.appendingPathComponent("include"),
+                ctx.sourceDir(.vulkan).appendingPathComponent("Package/Release/MoltenVK/include"),
+            ].compactMap { $0 }
+            if let include = includes.first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
                 flags.append("-I\(include.path)")
             }
         }
@@ -30,6 +32,7 @@ final class LibPlaceboBuilder: MesonBuilder {
     override func preCompile() throws {
         try super.preCompile()
         patchDemosMesonBuild()
+        try patchThreadCompileArgs()
         patchVulkanMesonBuild()
         patchVulkanUtilsGen()
         patchVulkanGpuApi14()
@@ -161,6 +164,40 @@ final class LibPlaceboBuilder: MesonBuilder {
             """
         )
         try? content.write(to: path, atomically: true, encoding: .utf8)
+    }
+
+    func patchThreadCompileArgs() throws {
+        let path = ctx.sourceDir(lib).appendingPathComponent("meson.build")
+        var content = try String(contentsOf: path)
+        if content.contains("thread_compile_args = []") { return }
+
+        let original = """
+            threads = declare_dependency(
+              dependencies: pthreads,
+              compile_args: [pthreads.found() ? '-DPL_HAVE_PTHREAD' : '',
+                             has_setclock ? '-DPTHREAD_HAS_SETCLOCK' : '',]
+            )
+        """
+        let patched = """
+            thread_compile_args = []
+            if pthreads.found()
+              thread_compile_args += ['-DPL_HAVE_PTHREAD']
+            endif
+            if has_setclock
+              thread_compile_args += ['-DPTHREAD_HAS_SETCLOCK']
+            endif
+
+            threads = declare_dependency(
+              dependencies: pthreads,
+              compile_args: thread_compile_args,
+            )
+        """
+
+        guard content.contains(original) else {
+            throw BuildError.unexpected("libplacebo pthread compile_args patch target not found: \(path.path)")
+        }
+        content = content.replacingOccurrences(of: original, with: patched)
+        try content.write(to: path, atomically: true, encoding: .utf8)
     }
 
     // Disable SDL demo build — it fails without an SDL2 cross-compile setup
