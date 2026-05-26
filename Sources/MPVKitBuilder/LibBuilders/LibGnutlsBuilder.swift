@@ -5,6 +5,48 @@ final class LibGnutlsBuilder: AutoconfBuilder {
         super.init(lib: .libgnutls, context: context)
     }
 
+    override func obtainSource() throws {
+        let source = ctx.sourceDir(lib)
+        let configure = source.appendingPathComponent("configure")
+        if FileManager.default.fileExists(atPath: configure.path) {
+            ctx.logger.step("source exists: \(source.path)")
+            return
+        }
+
+        if FileManager.default.fileExists(atPath: source.path) {
+            ctx.logger.step("discarding incomplete GnuTLS source: \(source.path)")
+            try removeIfExists(source)
+        }
+
+        let archive = ctx.options.workDirectory.appendingPathComponent("gnutls-\(lib.version).tar.xz")
+        try FileManager.default.createDirectory(at: ctx.options.workDirectory, withIntermediateDirectories: true)
+        try removeIfExists(archive)
+
+        ctx.logger.phase("fetch")
+        try ctx.runner.launch(
+            executable: "/usr/bin/curl",
+            arguments: ["-fL", "--retry", "3", "--connect-timeout", "30", "-o", archive.path, releaseArchiveURL()],
+            logTo: ctx.logFile(lib.rawValue)
+        )
+
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        do {
+            try ctx.runner.launch(
+                executable: "/usr/bin/tar",
+                arguments: ["-xJf", archive.path, "-C", source.path, "--strip-components", "1"],
+                logTo: ctx.logFile(lib.rawValue)
+            )
+            try removeIfExists(archive)
+        } catch {
+            try? removeIfExists(source)
+            throw error
+        }
+
+        if !FileManager.default.fileExists(atPath: configure.path) {
+            throw BuildError.unexpected("missing configure script in GnuTLS release archive: \(configure.path)")
+        }
+    }
+
     override func dependencyLibraries() -> [Library] {
         [.gmp, .nettle]
     }
@@ -59,5 +101,13 @@ final class LibGnutlsBuilder: AutoconfBuilder {
             "--disable-fast-install",
             "--disable-dependency-tracking",
         ]
+    }
+
+    func releaseArchiveURL() -> String {
+        let series = lib.version
+            .split(separator: ".")
+            .prefix(2)
+            .joined(separator: ".")
+        return "https://www.gnupg.org/ftp/gcrypt/gnutls/v\(series)/gnutls-\(lib.version).tar.xz"
     }
 }
