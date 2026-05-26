@@ -1,235 +1,228 @@
 name: Build Platform
-on:  
-  workflow_dispatch:    
-    inputs:      
-      platform:        
-        description: 'Single platform to build (macos, ios, isimulator, tvos, tvsimulator, xros, xrsimulator, maccatalyst)'        
-        type: choice        
-        required: true        
-        default: ios        
-        options:          
-          - macos          
-          - ios          
-          - isimulator          
-          - tvos          
-          - tvsimulator          
-          - xros          
-          - xrsimulator          
-          - maccatalyst      
-      vulkan_run_id:        
-        description: 'Run ID of a successful Prebuild Vulkan run (the number after /actions/runs/). A vulkan-prebuilt artifact ID or artifact URL is also accepted.'        
-        type: string        
-        required: true      
-      enable_gpl:        
-        description: 'Enable GPL (includes libsmbclient)'        
-        type: boolean        
-        default: false      
-      extra_ffmpeg:        
-        description: 'Extra FFmpeg configure args'        
-        type: string        
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Single platform to build (macos, ios, isimulator, tvos, tvsimulator, xros, xrsimulator, maccatalyst)'
+        type: choice
+        required: true
+        default: ios
+        options:
+          - macos
+          - ios
+          - isimulator
+          - tvos
+          - tvsimulator
+          - xros
+          - xrsimulator
+          - maccatalyst
+      vulkan_run_id:
+        description: 'Run ID of a successful Prebuild Vulkan run (the number after /actions/runs/). A vulkan-prebuilt artifact ID or artifact URL is also accepted.'
+        type: string
+        required: true
+      enable_gpl:
+        description: 'Enable GPL (includes libsmbclient)'
+        type: boolean
+        default: false
+      extra_ffmpeg:
+        description: 'Extra FFmpeg configure args'
+        type: string
         required: false
-jobs:  
-  build:    
-    name: build ${{ inputs.platform }}    
-    runs-on: macos-15    
-    timeout-minutes: 340    
-    steps:      
-      - uses: actions/checkout@v4      
-      - name: Pin Xcode        
-        uses: maxim-lobanov/setup-xcode@v1        
-        with:          
-          xcode-version: '16.2'      
-      - name: Free disk (drop unused Xcodes)        
-        run: |          
-          SELECTED=$(xcode-select -p)          
-          KEEP=$(dirname "$(dirname "$SELECTED")")          
-          echo "keeping $KEEP"          
-          for app in /Applications/Xcode*.app; do            
-            if [ "$app" != "$KEEP" ]; then              
-              echo "removing $app"              
-              sudo rm -rf "$app"            
-            fi          
-          done      
-      - name: Export selected Xcode        
-        run: |          
-          DEVELOPER_DIR=$(xcode-select -p)          
-          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"          
-          echo "DEVELOPER_DIR=$DEVELOPER_DIR"          
-          xcodebuild -version      
-      - name: First launch        
-        run: |          
-          sudo xcodebuild -runFirstLaunch          
-          xcodebuild -checkFirstLaunchStatus          
-          xcrun --kill-cache      
-      - name: Probe SDKs        
-        run: |          
-          xcodebuild -showsdks          
-          for sdk in iphoneos iphonesimulator appletvos appletvsimulator xros xrsimulator; do            
-            echo "== $sdk =="            
-            xcrun --no-cache --sdk "$sdk" --show-sdk-path            
-            xcrun --no-cache --sdk "$sdk" --show-sdk-platform-path          
-          done      
-      - name: Ensure selected platform components        
-        run: |          
-          case "${{ inputs.platform }}" in            
-            ios|isimulator)              
-              PLATFORM=iOS              
-              SDKS="iphoneos iphonesimulator"              
-              ;;            
-            tvos|tvsimulator)              
-              PLATFORM=tvOS              
-              SDKS="appletvos appletvsimulator"              
-              ;;            
-            xros|xrsimulator)              
-              PLATFORM=visionOS              
-              SDKS="xros xrsimulator"              
-              ;;            
-            *)              
-              echo "No downloadable platform component needed for ${{ inputs.platform }}"              
-              exit 0              
-              ;;          
-          esac          
-          NEED_DOWNLOAD=0          
-          for sdk in $SDKS; do            
-            echo "checking $sdk"            
-            xcrun --no-cache --sdk "$sdk" --show-sdk-path || NEED_DOWNLOAD=1            
-            xcrun --no-cache --sdk "$sdk" --show-sdk-platform-path || NEED_DOWNLOAD=1          
-          done          
-          if [ "$NEED_DOWNLOAD" -eq 1 ]; then            
-            echo "Downloading $PLATFORM platform components"            
-            xcrun --kill-cache            
-            xcodebuild -downloadPlatform "$PLATFORM"            
-            xcrun --kill-cache          
-          fi      
-      - name: Install build tools        
-        run: |          
-          brew update          
-          # å®è£åºç¡å·¥å·ãCåºå±ä¾èµåºãä»¥åé«çæ¬çè¯æ³è¯­æ³åæå¨
+jobs:
+  build:
+    name: build ${{ inputs.platform }}
+    runs-on: macos-15
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pin Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.2'
+      - name: Free disk (drop unused Xcodes)
+        run: |
+          SELECTED=$(xcode-select -p)
+          KEEP=$(dirname "$(dirname "$SELECTED")")
+          echo "keeping $KEEP"
+          for app in /Applications/Xcode*.app; do
+            if [ "$app" != "$KEEP" ]; then
+              echo "removing $app"
+              sudo rm -rf "$app"
+            fi
+          done
+      - name: Export selected Xcode
+        run: |
+          DEVELOPER_DIR=$(xcode-select -p)
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR"
+          xcodebuild -version
+      - name: First launch
+        run: |
+          sudo xcodebuild -runFirstLaunch
+          xcodebuild -checkFirstLaunchStatus
+          xcrun --kill-cache
+      - name: Probe SDKs
+        run: |
+          xcodebuild -showsdks
+          for sdk in iphoneos iphonesimulator appletvos appletvsimulator xros xrsimulator; do
+            echo "== $sdk =="
+            xcrun --no-cache --sdk "$sdk" --show-sdk-path
+            xcrun --no-cache --sdk "$sdk" --show-sdk-platform-path
+          done
+      - name: Ensure selected platform components
+        run: |
+          case "${{ inputs.platform }}" in
+            ios|isimulator)
+              PLATFORM=iOS
+              SDKS="iphoneos iphonesimulator"
+              ;;
+            tvos|tvsimulator)
+              PLATFORM=tvOS
+              SDKS="appletvos appletvsimulator"
+              ;;
+            xros|xrsimulator)
+              PLATFORM=visionOS
+              SDKS="xros xrsimulator"
+              ;;
+            *)
+              echo "No downloadable platform component needed for ${{ inputs.platform }}"
+              exit 0
+              ;;
+          esac
+          NEED_DOWNLOAD=0
+          for sdk in $SDKS; do
+            echo "checking $sdk"
+            xcrun --no-cache --sdk "$sdk" --show-sdk-path || NEED_DOWNLOAD=1
+            xcrun --no-cache --sdk "$sdk" --show-sdk-platform-path || NEED_DOWNLOAD=1
+          done
+          if [ "$NEED_DOWNLOAD" -eq 1 ]; then
+            echo "Downloading $PLATFORM platform components"
+            xcrun --kill-cache
+            xcodebuild -downloadPlatform "$PLATFORM"
+            xcrun --kill-cache
+          fi
+      - name: Install build tools
+        run: |
+          brew update
           brew install cmake meson ninja nasm pkg-config autoconf automake libtool python-setuptools bison flex cpanminus readline popt gnutls jansson
-          
-          # ä½¿ç¨ cpanm å®è£ Samba PIDL å¼ºä¾èµç Perl æ¨¡å
           cpanm Parse::Yapp
-          
-          # æ³¨å¥ bison å flex è·¯å¾ï¼ç¡®ä¿è¦ç macOS é»è®¤çæ§çæ¬
           echo "/opt/homebrew/opt/bison/bin" >> "$GITHUB_PATH"
           echo "/opt/homebrew/opt/flex/bin" >> "$GITHUB_PATH"
-          
-          # æ³¨å¥ç¯å¢åéï¼å¸®å©ç¼è¯å¨æ¾å° brew å®è£çå¤´æä»¶åå¨æåº
           echo "LDFLAGS=-L/opt/homebrew/lib" >> "$GITHUB_ENV"
           echo "CPPFLAGS=-I/opt/homebrew/include" >> "$GITHUB_ENV"
           echo "PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig" >> "$GITHUB_ENV"
-      - name: Download prebuilt vulkan        
-        env:          
-          REPO: ${{ github.repository }}          
-          VULKAN_INPUT: ${{ inputs.vulkan_run_id }}          
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}        
-        run: |          
-          set -euo pipefail          
-          mkdir -p prebuilt-vulkan-archive          
-          input_id="${VULKAN_INPUT%/}"          
-          case "$input_id" in            
-            */actions/runs/*)              
-              RUN_ID="${input_id#*/actions/runs/}"              
-              RUN_ID="${RUN_ID%%/*}"              
-              ARTIFACT_ID=""              
-              ;;            
-            */artifacts/*)              
-              ARTIFACT_ID="${input_id#*/artifacts/}"              
-              ARTIFACT_ID="${ARTIFACT_ID%%/*}"              
-              RUN_ID=""              
-              ;;            
-            *)              
-              RUN_ID="$input_id"              
-              ARTIFACT_ID="$input_id"              
-              ;;          
-          esac          
-          artifact_for_run() {            
-            gh api "repos/$REPO/actions/runs/$1/artifacts?per_page=100" \              
-              --jq '.artifacts[].name' 2>/dev/null \              
-              | while IFS= read -r name; do                  
-                  case "$name" in                    
-                    vulkan-prebuilt-*)                      
-                      printf '%s\n' "$name"                      
-                      break                      
-                      ;;                  
-                  esac                
-                done          
-          }          
-          ARTIFACT=""          
-          if [ -n "$RUN_ID" ]; then            
-            ARTIFACT=$(artifact_for_run "$RUN_ID" || true)          
-          fi          
-          if [ -z "$ARTIFACT" ] && [ -n "$ARTIFACT_ID" ]; then            
-            ARTIFACT_INFO=$(gh api "repos/$REPO/actions/artifacts/$ARTIFACT_ID" \              
-              --jq '[.workflow_run.id, .name] | @tsv' 2>/dev/null || true)            
-            if [ -n "$ARTIFACT_INFO" ]; then              
-              RESOLVED_RUN_ID="${ARTIFACT_INFO%%$'\t'*}"              
-              RESOLVED_ARTIFACT="${ARTIFACT_INFO#*$'\t'}"              
-              case "$RESOLVED_ARTIFACT" in                
-                vulkan-prebuilt-*)                  
-                  RUN_ID="$RESOLVED_RUN_ID"                  
-                  ARTIFACT="$RESOLVED_ARTIFACT"                  
-                  echo "resolved artifact $ARTIFACT_ID to run $RUN_ID"                  
-                  ;;              
-              esac            
-            fi          
-          fi          
-          if [ -z "$ARTIFACT" ]; then            
-            echo "no vulkan-prebuilt-* artifact found for input $VULKAN_INPUT"            
-            echo "Use the Prebuild Vulkan run ID from /actions/runs/<run_id>, or paste the vulkan-prebuilt artifact URL."            
-            exit 1          
-          fi          
-          echo "downloading $ARTIFACT from run $RUN_ID"          
-          gh run download "$RUN_ID" \            
-            --repo "$REPO" \            
-            --name "$ARTIFACT" \            
-            --dir prebuilt-vulkan-archive          
-          ls -R prebuilt-vulkan-archive          
-          tar -xJf prebuilt-vulkan-archive/vulkan-prebuilt.tar.xz          
-          ls prebuilt-vulkan          
-          ls prebuilt-vulkan/MoltenVK.xcframework      
-      - name: Build platform        
-        env:          
-          PREBUILT_VULKAN: ${{ github.workspace }}/prebuilt-vulkan        
-        run: |          
-          set -x          
-          ARGS=(            
-            platform=${{ inputs.platform }}            
-            split-platform            
-            clean-after-lib            
-            verbose            
-            prebuilt-vulkan=$PREBUILT_VULKAN          
-          )          
-          if [ "${{ inputs.enable_gpl }}" = "true" ]; then            
-            ARGS+=(enable-gpl)          
-          else            
-            ARGS+=(disable-gpl)          
-          fi          
-          if [ -n "${{ inputs.extra_ffmpeg }}" ]; then            
-            ARGS+=("extra-ffmpeg=${{ inputs.extra_ffmpeg }}")          
-          fi          
-          swift run --package-path . MPVKitBuilder build "${ARGS[@]}"      
-      - name: Disk after build        
-        if: always()        
-        run: |          
-          df -h          
-          du -sh build dist dist-platform 2>/dev/null || true      
-      - name: Stage slice        
-        run: |          
-          ls dist-platform          
-          du -sh dist-platform/${{ inputs.platform }}          
-          tar -cJf slice-${{ inputs.platform }}.tar.xz -C dist-platform ${{ inputs.platform }}          
-          ls -lh slice-${{ inputs.platform }}.tar.xz      
-      - name: Upload slice        
-        uses: actions/upload-artifact@v4        
-        with:          
-          name: slice-${{ inputs.platform }}-${{ github.run_number }}          
-          path: slice-${{ inputs.platform }}.tar.xz          
-          retention-days: 7      
-      - name: Upload reports        
-        if: always()        
-        uses: actions/upload-artifact@v4        
-        with:          
-          name: reports-${{ inputs.platform }}-${{ github.run_number }}          
-          path: .build/reports          
+      - name: Download prebuilt vulkan
+        env:
+          REPO: ${{ github.repository }}
+          VULKAN_INPUT: ${{ inputs.vulkan_run_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p prebuilt-vulkan-archive
+          input_id="${VULKAN_INPUT%/}"
+          case "$input_id" in
+            */actions/runs/*)
+              RUN_ID="${input_id#*/actions/runs/}"
+              RUN_ID="${RUN_ID%%/*}"
+              ARTIFACT_ID=""
+              ;;
+            */artifacts/*)
+              ARTIFACT_ID="${input_id#*/artifacts/}"
+              ARTIFACT_ID="${ARTIFACT_ID%%/*}"
+              RUN_ID=""
+              ;;
+            *)
+              RUN_ID="$input_id"
+              ARTIFACT_ID="$input_id"
+              ;;
+          esac
+          artifact_for_run() {
+            gh api "repos/$REPO/actions/runs/$1/artifacts?per_page=100" \
+              --jq '.artifacts[].name' 2>/dev/null \
+              | while IFS= read -r name; do
+                  case "$name" in
+                    vulkan-prebuilt-*)
+                      printf '%s\n' "$name"
+                      break
+                      ;;
+                  esac
+                done
+          }
+          ARTIFACT=""
+          if [ -n "$RUN_ID" ]; then
+            ARTIFACT=$(artifact_for_run "$RUN_ID" || true)
+          fi
+          if [ -z "$ARTIFACT" ] && [ -n "$ARTIFACT_ID" ]; then
+            ARTIFACT_INFO=$(gh api "repos/$REPO/actions/artifacts/$ARTIFACT_ID" \
+              --jq '[.workflow_run.id, .name] | @tsv' 2>/dev/null || true)
+            if [ -n "$ARTIFACT_INFO" ]; then
+              RESOLVED_RUN_ID="${ARTIFACT_INFO%%$'\t'*}"
+              RESOLVED_ARTIFACT="${ARTIFACT_INFO#*$'\t'}"
+              case "$RESOLVED_ARTIFACT" in
+                vulkan-prebuilt-*)
+                  RUN_ID="$RESOLVED_RUN_ID"
+                  ARTIFACT="$RESOLVED_ARTIFACT"
+                  echo "resolved artifact $ARTIFACT_ID to run $RUN_ID"
+                  ;;
+              esac
+            fi
+          fi
+          if [ -z "$ARTIFACT" ]; then
+            echo "no vulkan-prebuilt-* artifact found for input $VULKAN_INPUT"
+            echo "Use the Prebuild Vulkan run ID from /actions/runs/<run_id>, or paste the vulkan-prebuilt artifact URL."
+            exit 1
+          fi
+          echo "downloading $ARTIFACT from run $RUN_ID"
+          gh run download "$RUN_ID" \
+            --repo "$REPO" \
+            --name "$ARTIFACT" \
+            --dir prebuilt-vulkan-archive
+          ls -R prebuilt-vulkan-archive
+          tar -xJf prebuilt-vulkan-archive/vulkan-prebuilt.tar.xz
+          ls prebuilt-vulkan
+          ls prebuilt-vulkan/MoltenVK.xcframework
+      - name: Build platform
+        env:
+          PREBUILT_VULKAN: ${{ github.workspace }}/prebuilt-vulkan
+        run: |
+          set -x
+          ARGS=(
+            platform=${{ inputs.platform }}
+            split-platform
+            clean-after-lib
+            verbose
+            prebuilt-vulkan=$PREBUILT_VULKAN
+          )
+          if [ "${{ inputs.enable_gpl }}" = "true" ]; then
+            ARGS+=(enable-gpl)
+          else
+            ARGS+=(disable-gpl)
+          fi
+          if [ -n "${{ inputs.extra_ffmpeg }}" ]; then
+            ARGS+=("extra-ffmpeg=${{ inputs.extra_ffmpeg }}")
+          fi
+          swift run --package-path . MPVKitBuilder build "${ARGS[@]}"
+      - name: Disk after build
+        if: always()
+        run: |
+          df -h
+          du -sh build dist dist-platform 2>/dev/null || true
+      - name: Stage slice
+        run: |
+          ls dist-platform
+          du -sh dist-platform/${{ inputs.platform }}
+          tar -cJf slice-${{ inputs.platform }}.tar.xz -C dist-platform ${{ inputs.platform }}
+          ls -lh slice-${{ inputs.platform }}.tar.xz
+      - name: Upload slice
+        uses: actions/upload-artifact@v4
+        with:
+          name: slice-${{ inputs.platform }}-${{ github.run_number }}
+          path: slice-${{ inputs.platform }}.tar.xz
+          retention-days: 7
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ inputs.platform }}-${{ github.run_number }}
+          path: .build/reports
           retention-days: 7
