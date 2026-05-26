@@ -7,6 +7,16 @@ on:
         description: Optional run note
         required: false
         type: string
+  push:
+    paths:
+      - ".github/workflows/verify-libplacebo-maccatalyst.yml"
+      - "Package.swift"
+      - "Sources/MPVKitBuilder/Builders/**"
+      - "Sources/MPVKitBuilder/Core/**"
+      - "Sources/MPVKitBuilder/Domain/**"
+      - "Sources/MPVKitBuilder/LibBuilders/LibLcms2Builder.swift"
+      - "Sources/MPVKitBuilder/LibBuilders/LibPlaceboBuilder.swift"
+      - "Sources/MPVKitBuilder/LibBuilders/LibShadercBuilder.swift"
   pull_request:
     paths:
       - ".github/workflows/verify-libplacebo-maccatalyst.yml"
