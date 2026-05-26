@@ -16,7 +16,7 @@ on:
         type: string
         required: false
       tag:
-        description: 'Optional tag/name for the GitHub Release. Defaults to mpvkit-YYYYMMDD-HHMM.'
+        description: 'Optional tag/name for the GitHub Release. Defaults to MPVKit-YYYYMMDD-HHMM.'
         type: string
         required: false
 
@@ -177,9 +177,9 @@ jobs:
             release_tag="$TAG_INPUT"
             safe_tag="${TAG_INPUT//\//-}"
             safe_tag="${safe_tag// /-}"
-            bundle_name="mpvkit-${safe_tag}-${stamp}"
+            bundle_name="MPVKit-${safe_tag}-${stamp}"
           else
-            release_tag="mpvkit-${stamp}"
+            release_tag="MPVKit-${stamp}"
             bundle_name="$release_tag"
           fi
 
