@@ -5,16 +5,11 @@ final class LibDoviBuilder: Builder {
         super.init(lib: .libdovi, context: context)
     }
 
-    // Stable Rust cross-compilation targets only cover macOS, iOS, and iOS Simulator.
-    // tvOS, visionOS, and Mac Catalyst require nightly Rust and are deferred.
-    override func platforms() -> [PlatformType] {
-        let supported: Set<PlatformType> = [.macos, .ios, .isimulator]
-        return super.platforms().filter { supported.contains($0) }
-    }
-
-    // arm64e has no corresponding Rust target triple.
+    // Keep only architecture/platform pairs that have an installable Rust target.
     override func architectures(for platform: PlatformType) -> [ArchType] {
-        super.architectures(for: platform).filter { $0 != .arm64e }
+        super.architectures(for: platform).filter { arch in
+            (try? rustTargetTriple(platform: platform, arch: arch)) != nil
+        }
     }
 
     override func build() throws {
@@ -52,21 +47,24 @@ final class LibDoviBuilder: Builder {
         // Add the Rust target if rustup is available.
         // rustup lives in ~/.cargo/bin which is not in Builder's default toolPath search.
         if let rustup = rustupPath() {
-            try? ctx.runner.launch(
-                executable: rustup,
-                arguments: ["target", "add", rustTarget],
-                logTo: ctx.logFile(lib.rawValue)
-            )
+            do {
+                try ctx.runner.launch(
+                    executable: rustup,
+                    arguments: ["target", "add", rustTarget],
+                    logTo: ctx.logFile(lib.rawValue)
+                )
+            } catch {
+                ctx.logger.step("could not add Rust target \(rustTarget): \(error)")
+            }
         }
 
-        var env = ProcessInfo.processInfo.environment
+        var env = environment(platform: platform, arch: arch)
         let cargoHome = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cargo/bin").path
-        env["PATH"] = "\(cargoHome):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:\(env["PATH"] ?? "")"
+        env["PATH"] = "\(cargoHome):\(env["PATH"] ?? "")"
 
-        let clang = platform.xcrunFind(tool: "clang")
+        let clang = env["CC"] ?? platform.xcrunFind(tool: "clang")
         if !clang.isEmpty {
             env["CC"] = clang
-            env["CFLAGS"] = cFlags(platform: platform, arch: arch).joined(separator: " ")
             // Tell cargo which linker to use when targeting this Apple platform.
             let linkerKey = "CARGO_TARGET_\(rustTarget.uppercased().replacingOccurrences(of: "-", with: "_"))_LINKER"
             env[linkerKey] = clang
@@ -114,11 +112,17 @@ extension LibDoviBuilder {
 extension LibDoviBuilder {
     func rustTargetTriple(platform: PlatformType, arch: ArchType) throws -> String {
         switch (platform, arch) {
-        case (.macos, .arm64):        return "aarch64-apple-darwin"
-        case (.macos, .x86_64):       return "x86_64-apple-darwin"
-        case (.ios, .arm64):          return "aarch64-apple-ios"
-        case (.isimulator, .arm64):   return "aarch64-apple-ios-sim"
-        case (.isimulator, .x86_64):  return "x86_64-apple-ios"
+        case (.macos, .arm64):          return "aarch64-apple-darwin"
+        case (.macos, .x86_64):         return "x86_64-apple-darwin"
+        case (.ios, .arm64):            return "aarch64-apple-ios"
+        case (.isimulator, .arm64):     return "aarch64-apple-ios-sim"
+        case (.isimulator, .x86_64):    return "x86_64-apple-ios"
+        case (.tvos, .arm64):           return "aarch64-apple-tvos"
+        case (.tvsimulator, .arm64):    return "aarch64-apple-tvos-sim"
+        case (.xros, .arm64):           return "aarch64-apple-visionos"
+        case (.xrsimulator, .arm64):    return "aarch64-apple-visionos-sim"
+        case (.maccatalyst, .arm64):    return "aarch64-apple-ios-macabi"
+        case (.maccatalyst, .x86_64):   return "x86_64-apple-ios-macabi"
         default:
             throw BuildError.platformNotSupported(
                 library: lib.rawValue,

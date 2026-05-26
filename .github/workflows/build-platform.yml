@@ -108,7 +108,6 @@ jobs:
           cpanm Parse::Yapp
           python3 -m pip install jinja2 --break-system-packages
       - name: Install Rust build tools
-        if: ${{ inputs.platform == 'macos' || inputs.platform == 'ios' || inputs.platform == 'isimulator' }}
         run: |
           set -euo pipefail
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
@@ -125,7 +124,13 @@ jobs:
             x86_64-apple-darwin \
             aarch64-apple-ios \
             aarch64-apple-ios-sim \
-            x86_64-apple-ios
+            x86_64-apple-ios \
+            aarch64-apple-ios-macabi \
+            x86_64-apple-ios-macabi \
+            aarch64-apple-tvos \
+            aarch64-apple-tvos-sim \
+            aarch64-apple-visionos \
+            aarch64-apple-visionos-sim
 
           if ! command -v cargo-cinstall >/dev/null 2>&1; then
             cargo install cargo-c --locked
