@@ -246,11 +246,12 @@ jobs:
               "https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/${VULKAN_HEADERS_TAG}.tar.gz"
             mkdir -p "$EXTRACT" prebuilt-vulkan/include prebuilt-vulkan/share/vulkan/registry
             tar -xzf "$ARCHIVE" -C "$EXTRACT" --strip-components=1
-            cp -R "$EXTRACT/include/vulkan" prebuilt-vulkan/include/
+            cp -R "$EXTRACT/include/." prebuilt-vulkan/include/
             cp "$EXTRACT/registry/vk.xml" prebuilt-vulkan/share/vulkan/registry/vk.xml
           fi
 
           test -f prebuilt-vulkan/include/vulkan/vulkan.h
+          test -f prebuilt-vulkan/include/vk_video/vulkan_video_codec_h264std.h
           test -s prebuilt-vulkan/share/vulkan/registry/vk.xml
           du -sh prebuilt-vulkan
           tar -cJf vulkan-prebuilt.tar.xz prebuilt-vulkan
