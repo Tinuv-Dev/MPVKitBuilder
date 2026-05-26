@@ -104,7 +104,7 @@ jobs:
       - name: Install build tools
         run: |
           brew update
-          brew install cmake meson ninja nasm pkg-config autoconf automake libtool python-setuptools bison flex cpanminus readline popt gnutls jansson
+          brew install cmake meson ninja nasm pkg-config autoconf automake libtool python-setuptools bison flex cpanminus readline popt jansson
           cpanm Parse::Yapp
           echo "/opt/homebrew/opt/bison/bin" >> "$GITHUB_PATH"
           echo "/opt/homebrew/opt/flex/bin" >> "$GITHUB_PATH"
