@@ -23,7 +23,7 @@ swift run --package-path . MPVKitBuilder package package-platforms=ios,isimulato
 
 ## 2. 在其它 SwiftPM 工程中引用
 
-`dist/Package.swift` 是一个完整的本地 Package，主 product 名为 `MPVKit`。在你的应用工程里：
+`dist/Package.swift` 是一个完整的本地 Package，主 product 名为 `MPVKit`。它会通过 `_MPVKit` / `_FFmpeg` 包装 target 连接二进制库依赖和系统 framework / library，避免消费端只引用 binaryTarget 时缺少链接参数。在你的应用工程里：
 
 ```swift
 // Package.swift

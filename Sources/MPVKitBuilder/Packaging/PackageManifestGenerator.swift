@@ -3,9 +3,9 @@ import Foundation
 /// Generates `dist/Package.swift` so consumers can `swift package add` or use a
 /// local `path:` dependency to pick up every XCFramework produced by this run.
 ///
-/// Mode: local only. Each XCFramework becomes one `.binaryTarget(path:)`, all
-/// rolled into a single `MPVKit` library product. Remote (`url:checksum:`) mode
-/// is intentionally deferred — see DESIGN.md §九.
+/// Mode: local only. Each XCFramework becomes one `.binaryTarget(path:)`, with
+/// lightweight Swift targets carrying dependency edges and linker settings.
+/// Remote (`url:checksum:`) mode is intentionally deferred — see DESIGN.md §九.
 enum PackageManifestGenerator {
     struct Manifest {
         /// XCFramework names without the `.xcframework` suffix, sorted for stable output.
@@ -52,6 +52,7 @@ enum PackageManifestGenerator {
         logger: BuildLogger? = nil
     ) throws -> URL {
         let manifest = try scan(distDirectory: distDirectory, platforms: platforms)
+        try writeSupportSources(distDirectory: distDirectory)
         let body = render(manifest: manifest)
         let url = distDirectory.appendingPathComponent("Package.swift")
         try body.write(to: url, atomically: true, encoding: .utf8)
@@ -105,6 +106,28 @@ enum PackageManifestGenerator {
         }
         return PlatformDeclaration.allCases.filter { resolved.contains($0) }
     }
+
+    static func writeSupportSources(distDirectory: URL) throws {
+        let files: [(path: String, body: String)] = [
+            (
+                "Sources/_MPVKit/MPVKitLinkAnchor.swift",
+                "public enum MPVKitLinkAnchor {}\n"
+            ),
+            (
+                "Sources/_FFmpeg/FFmpegLinkAnchor.swift",
+                "public enum FFmpegLinkAnchor {}\n"
+            ),
+        ]
+
+        for file in files {
+            let url = distDirectory.appendingPathComponent(file.path)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try file.body.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
 }
 
 // MARK: - Rendering
@@ -135,14 +158,14 @@ extension PackageManifestGenerator {
         out += "    products: [\n"
         out += "        .library(\n"
         out += "            name: \"MPVKit\",\n"
-        out += "            targets: [\n"
-        for name in manifest.targets {
-            out += "                \"\(name)\",\n"
-        }
-        out += "            ]\n"
+        out += "            targets: [\"_MPVKit\"]\n"
         out += "        ),\n"
         out += "    ],\n"
         out += "    targets: [\n"
+        out += renderMPVKitTarget(manifest: manifest)
+        if !ffmpegDependencies(manifest: manifest).isEmpty {
+            out += renderFFmpegTarget(manifest: manifest)
+        }
         for name in manifest.targets {
             out += "        .binaryTarget(name: \"\(name)\", path: \"\(name).xcframework\"),\n"
         }
@@ -151,9 +174,137 @@ extension PackageManifestGenerator {
         return out
     }
 
+    static func renderMPVKitTarget(manifest: Manifest) -> String {
+        var out = ""
+        out += "        .target(\n"
+        out += "            name: \"_MPVKit\",\n"
+        out += "            dependencies: [\n"
+        for dependency in mpvKitDependencies(manifest: manifest) {
+            out += "                \(dependency),\n"
+        }
+        out += "            ],\n"
+        out += "            path: \"Sources/_MPVKit\",\n"
+        out += "            linkerSettings: [\n"
+        for setting in mpvKitLinkerSettings() {
+            out += "                \(setting),\n"
+        }
+        out += "            ]\n"
+        out += "        ),\n"
+        return out
+    }
+
+    static func renderFFmpegTarget(manifest: Manifest) -> String {
+        var out = ""
+        out += "        .target(\n"
+        out += "            name: \"_FFmpeg\",\n"
+        out += "            dependencies: [\n"
+        for dependency in ffmpegDependencies(manifest: manifest) {
+            out += "                \(dependency),\n"
+        }
+        out += "            ],\n"
+        out += "            path: \"Sources/_FFmpeg\",\n"
+        out += "            linkerSettings: [\n"
+        for setting in ffmpegLinkerSettings() {
+            out += "                \(setting),\n"
+        }
+        out += "            ]\n"
+        out += "        ),\n"
+        return out
+    }
+
     static func isoTimestamp(_ date: Date) -> String {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         return f.string(from: date)
+    }
+}
+
+// MARK: - Target graph
+
+extension PackageManifestGenerator {
+    static func mpvKitDependencies(manifest: Manifest) -> [String] {
+        let available = Set(manifest.targets)
+        var dependencies: [String] = []
+
+        appendIfPresent("Libmpv", available: available, to: &dependencies)
+        if !ffmpegDependencies(manifest: manifest).isEmpty {
+            dependencies.append("\"_FFmpeg\"")
+        }
+        for name in ["Libuchardet", "Libbluray", "Libluajit"] {
+            appendIfPresent(name, available: available, to: &dependencies)
+        }
+
+        return dependencies
+    }
+
+    static func ffmpegDependencies(manifest: Manifest) -> [String] {
+        let available = Set(manifest.targets)
+        let names = [
+            "Libavcodec",
+            "Libavdevice",
+            "Libavfilter",
+            "Libavformat",
+            "Libavutil",
+            "Libswresample",
+            "Libswscale",
+            "Libssl",
+            "Libcrypto",
+            "Libass",
+            "Libfreetype",
+            "Libfribidi",
+            "Libharfbuzz",
+            "MoltenVK",
+            "Libshaderc_combined",
+            "lcms2",
+            "Libplacebo",
+            "Libdovi",
+            "Libunibreak",
+            "gmp",
+            "nettle",
+            "hogweed",
+            "gnutls",
+            "Libdav1d",
+            "Libuavs3d",
+            "libsrt",
+            "libzvbi",
+            "libsmbclient",
+        ]
+
+        return names.compactMap { name in
+            available.contains(name) ? "\"\(name)\"" : nil
+        }
+    }
+
+    static func appendIfPresent(_ name: String, available: Set<String>, to dependencies: inout [String]) {
+        if available.contains(name) {
+            dependencies.append("\"\(name)\"")
+        }
+    }
+
+    static func mpvKitLinkerSettings() -> [String] {
+        [
+            ".linkedFramework(\"AVFoundation\")",
+            ".linkedFramework(\"CoreAudio\")",
+            ".linkedFramework(\"AudioToolbox\")",
+        ]
+    }
+
+    static func ffmpegLinkerSettings() -> [String] {
+        [
+            ".linkedFramework(\"AudioToolbox\")",
+            ".linkedFramework(\"CoreVideo\")",
+            ".linkedFramework(\"CoreFoundation\")",
+            ".linkedFramework(\"CoreMedia\")",
+            ".linkedFramework(\"Metal\")",
+            ".linkedFramework(\"Security\")",
+            ".linkedFramework(\"VideoToolbox\")",
+            ".linkedLibrary(\"bz2\")",
+            ".linkedLibrary(\"iconv\")",
+            ".linkedLibrary(\"expat\")",
+            ".linkedLibrary(\"resolv\")",
+            ".linkedLibrary(\"xml2\")",
+            ".linkedLibrary(\"z\")",
+            ".linkedLibrary(\"c++\")",
+        ]
     }
 }

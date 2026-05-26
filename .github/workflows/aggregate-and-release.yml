@@ -214,6 +214,9 @@ jobs:
       - name: Generate Package.swift
         run: swift run --package-path . MPVKitBuilder package "package-platforms=$PACKAGE_PLATFORMS"
 
+      - name: Validate generated Package.swift
+        run: swift package dump-package --package-path dist
+
       - name: Show dist
         run: |
           ls -lh dist
