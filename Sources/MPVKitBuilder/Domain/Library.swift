@@ -74,7 +74,7 @@ extension Library {
         case .libsrt: return "https://github.com/Haivision/srt"
         case .libzvbi: return "https://github.com/zapping-vbi/zvbi"
         case .gmp: return "https://github.com/alisw/GMP"
-        case .nettle: return "https://git.lysator.liu.se/nettle/nettle"
+        case .nettle: return "https://github.com/gnutls/nettle"
         case .libgnutls: return "https://github.com/gnutls/gnutls"
         case .libsmbclient: return "https://github.com/samba-team/samba"
         case .vulkan: return "https://github.com/KhronosGroup/MoltenVK"
