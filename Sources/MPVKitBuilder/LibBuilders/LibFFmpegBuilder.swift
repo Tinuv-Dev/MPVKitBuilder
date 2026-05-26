@@ -23,6 +23,10 @@ final class LibFFmpegBuilder: AutoconfBuilder {
         buildDirectory
     }
 
+    override func configureDiagnosticLog(platform: PlatformType, arch: ArchType, buildDirectory: URL) -> URL? {
+        buildDirectory.appendingPathComponent("ffbuild/config.log")
+    }
+
     // prepareConfigure runs from source dir; FFmpeg's configure always exists so nothing to generate.
     override func prepareConfigure(platform: PlatformType, arch: ArchType, buildDirectory: URL, environment: [String: String]) throws {}
 
@@ -223,6 +227,7 @@ extension LibFFmpegBuilder {
         var args: [String] = []
         for dep in LibraryDependency.dependencies(of: .ffmpeg) {
             guard depIsAvailable(dep, platform: platform, arch: arch) else { continue }
+            guard ffmpegCanUse(dep, platform: platform) else { continue }
             args.append("--enable-\(dep.rawValue)")
             switch dep {
             case .libsrt, .libsmbclient:
@@ -241,6 +246,16 @@ extension LibFFmpegBuilder {
             }
         }
         return args
+    }
+
+    func ffmpegCanUse(_ dep: Library, platform: PlatformType) -> Bool {
+        // Mac Catalyst keeps VideoToolbox hardware decode, but FFmpeg's libplacebo
+        // filter is not useful without the Vulkan/MoltenVK backend and fails CI
+        // pkg-config link checks under Xcode 16.2.
+        if dep == .libplacebo && platform == .maccatalyst {
+            return false
+        }
+        return true
     }
 
     func depIsAvailable(_ dep: Library, platform: PlatformType, arch: ArchType) -> Bool {

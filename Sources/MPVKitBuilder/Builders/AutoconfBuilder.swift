@@ -30,6 +30,10 @@ class AutoconfBuilder: Builder {
         buildDirectory
     }
 
+    func configureDiagnosticLog(platform: PlatformType, arch: ArchType, buildDirectory: URL) -> URL? {
+        nil
+    }
+
     func makeArguments(platform: PlatformType, arch: ArchType) -> [String] {
         ["-j\(ProcessInfo.processInfo.activeProcessorCount)"]
     }
@@ -88,13 +92,18 @@ class AutoconfBuilder: Builder {
         let env = environment(platform: platform, arch: arch)
         try prepareConfigure(platform: platform, arch: arch, buildDirectory: buildDirectory, environment: env)
 
-        try ctx.runner.launch(
-            executable: try configureExecutable(platform: platform, arch: arch, buildDirectory: buildDirectory),
-            arguments: try configureArguments(platform: platform, arch: arch, buildDirectory: buildDirectory),
-            currentDirectory: configureWorkingDirectory(platform: platform, arch: arch, buildDirectory: buildDirectory),
-            environment: env,
-            logTo: ctx.logFile(lib.rawValue)
-        )
+        do {
+            try ctx.runner.launch(
+                executable: try configureExecutable(platform: platform, arch: arch, buildDirectory: buildDirectory),
+                arguments: try configureArguments(platform: platform, arch: arch, buildDirectory: buildDirectory),
+                currentDirectory: configureWorkingDirectory(platform: platform, arch: arch, buildDirectory: buildDirectory),
+                environment: env,
+                logTo: ctx.logFile(lib.rawValue)
+            )
+        } catch {
+            copyConfigureDiagnosticLog(platform: platform, arch: arch, buildDirectory: buildDirectory)
+            throw error
+        }
 
         try postConfigure(platform: platform, arch: arch, buildDirectory: buildDirectory)
 
@@ -113,5 +122,29 @@ class AutoconfBuilder: Builder {
             environment: env,
             logTo: ctx.logFile(lib.rawValue)
         )
+    }
+}
+
+// MARK: - Diagnostics
+
+extension AutoconfBuilder {
+    func copyConfigureDiagnosticLog(platform: PlatformType, arch: ArchType, buildDirectory: URL) {
+        guard let source = configureDiagnosticLog(platform: platform, arch: arch, buildDirectory: buildDirectory),
+              FileManager.default.fileExists(atPath: source.path) else { return }
+
+        let destination = ctx.logFile("\(lib.rawValue)-\(platform.rawValue)-\(arch.rawValue)-config")
+        do {
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.copyItem(at: source, to: destination)
+            ctx.logger.step("configure diagnostic: \(destination.path)", level: .warn)
+        } catch {
+            ctx.logger.step("failed to copy configure diagnostic: \(error)", level: .warn)
+        }
     }
 }
