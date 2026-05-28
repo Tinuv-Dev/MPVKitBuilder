@@ -10,6 +10,7 @@ enum PackageManifestGenerator {
     struct Manifest {
         /// XCFramework names without the `.xcframework` suffix, sorted for stable output.
         let targets: [String]
+        let requestedPlatforms: [PlatformType]
         let platforms: [PlatformDeclaration]
         let distDirectory: URL
         let generatedAt: Date
@@ -39,6 +40,16 @@ enum PackageManifestGenerator {
             case .iOS: return ".iOS(.v13)"
             case .tvOS: return ".tvOS(.v13)"
             case .visionOS: return ".visionOS(.v1)"
+            }
+        }
+
+        var conditionPlatform: String {
+            switch self {
+            case .macOS: return ".macOS"
+            case .macCatalyst: return ".macCatalyst"
+            case .iOS: return ".iOS"
+            case .tvOS: return ".tvOS"
+            case .visionOS: return ".visionOS"
             }
         }
     }
@@ -82,6 +93,7 @@ enum PackageManifestGenerator {
         }
         return Manifest(
             targets: targets,
+            requestedPlatforms: platforms,
             platforms: packagePlatforms,
             distDirectory: distDirectory,
             generatedAt: Date()
@@ -240,11 +252,12 @@ extension PackageManifestGenerator {
             appendDependencyName(name, to: &dependencyNames, seen: &seen)
         }
 
-        return dependencyNames.map { "\"\($0)\"" }
+        return dependencyNames.compactMap { dependencyExpression(name: $0, manifest: manifest) }
     }
 
     static func ffmpegDependencies(manifest: Manifest) -> [String] {
-        ffmpegDependencyTargetNames(manifest: manifest).map { "\"\($0)\"" }
+        ffmpegDependencyTargetNames(manifest: manifest)
+            .compactMap { dependencyExpression(name: $0, manifest: manifest) }
     }
 
     static func ffmpegDependencyTargetNames(manifest: Manifest) -> [String] {
@@ -286,6 +299,26 @@ extension PackageManifestGenerator {
         if seen.insert(name).inserted {
             names.append(name)
         }
+    }
+
+    static func dependencyExpression(name: String, manifest: Manifest) -> String? {
+        guard let library = library(forTargetName: name) else {
+            return "\"\(name)\""
+        }
+
+        let supportedPlatforms = library.supportedPlatforms(from: manifest.requestedPlatforms)
+        let supportedDeclarations = platformDeclarations(for: supportedPlatforms)
+        guard !supportedDeclarations.isEmpty else { return nil }
+        if supportedDeclarations == manifest.platforms {
+            return "\"\(name)\""
+        }
+
+        let conditionPlatforms = supportedDeclarations.map(\.conditionPlatform).joined(separator: ", ")
+        return ".target(name: \"\(name)\", condition: .when(platforms: [\(conditionPlatforms)]))"
+    }
+
+    static func library(forTargetName name: String) -> Library? {
+        Library.allCases.first { $0.expectedFrameworks.contains(name) }
     }
 
     static func mpvKitLinkerSettings() -> [String] {

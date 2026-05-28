@@ -131,7 +131,7 @@ extension XCFrameworkAssembler {
     }
 
     func writeInfoPlist(framework: String, platform: PlatformType, to frameworkDir: URL) throws {
-        let identifier = "com.mpvkitbuilder.\(framework)"
+        let identifier = "com.mpvkitbuilder.\(bundleIdentifierComponent(framework))"
         let content = """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -175,5 +175,14 @@ extension XCFrameworkAssembler {
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
         }
+    }
+
+    func bundleIdentifierComponent(_ value: String) -> String {
+        value.map { character in
+            if character.isLetter || character.isNumber || character == "-" {
+                return character
+            }
+            return "-"
+        }.reduce(into: "") { $0.append($1) }
     }
 }

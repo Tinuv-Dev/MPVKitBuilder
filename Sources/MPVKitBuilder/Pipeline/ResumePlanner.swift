@@ -121,7 +121,11 @@ enum ResumePlanner {
         }
         return lib.expectedFrameworks.allSatisfy { framework in
             let url = options.distDirectory.appendingPathComponent("\(framework).xcframework")
-            return FileManager.default.fileExists(atPath: url.path)
+            guard FileManager.default.fileExists(atPath: url.path) else { return false }
+            return lib.supportedPlatforms(from: options.platforms).allSatisfy { platform in
+                let architectures = platform.resolvedArchitectures(requested: options.architectures)
+                return XCFrameworkMetadata.containsPlatform(platform, architectures: architectures, at: url)
+            }
         }
     }
 }
