@@ -33,6 +33,7 @@ final class LibMpvBuilder: MesonBuilder {
     override func mesonExtraSetupArguments(platform: PlatformType, arch: ArchType, buildDirectory: URL) throws -> [String] {
         var args = baseOptions()
         args.append(contentsOf: dependencyOptions(platform: platform, arch: arch))
+        args.append(contentsOf: gpuOptions(platform: platform, arch: arch))
         args.append(contentsOf: appleOptions(platform: platform))
         return args
     }
@@ -119,7 +120,6 @@ extension LibMpvBuilder {
             "-Dvaapi-wayland=disabled",
             "-Dvaapi-win32=disabled",
             "-Dvaapi-x11=disabled",
-            "-Dvulkan=disabled",
             "-Dwayland=disabled",
             "-Dx11=disabled",
             "-Dxv=disabled",
@@ -129,9 +129,7 @@ extension LibMpvBuilder {
             "-Dcuda-interop=disabled",
             "-Dd3d-hwaccel=disabled",
             "-Dd3d9-hwaccel=disabled",
-            "-Dios-gl=disabled",
             "-Dvideotoolbox-gl=disabled",
-            "-Dvideotoolbox-pl=disabled",
 
             "-Dmacos-10-15-4-features=disabled",
             "-Dmacos-11-features=disabled",
@@ -151,6 +149,22 @@ extension LibMpvBuilder {
             "-Dlibbluray=\(dependencyIsBuilt(.libbluray, platform: platform, arch: arch) ? "enabled" : "disabled")",
             "-Dlua=\(dependencyIsBuilt(.libluajit, platform: platform, arch: arch) ? "luajit" : "disabled")",
             "-Duchardet=\(dependencyIsBuilt(.libuchardet, platform: platform, arch: arch) ? "enabled" : "disabled")",
+        ]
+    }
+
+    func gpuOptions(platform: PlatformType, arch: ArchType) -> [String] {
+        // vo=gpu-next（libplacebo）在 Apple 上的实际链路是
+        // VideoToolbox 解码 -> libplacebo -> MoltenVK(Vulkan) -> CAMetalLayer。
+        // 若不开 vulkan/moltenvk/videotoolbox-pl，gpu-next 拿不到可用 GPU 上下文、
+        // 也无法上传 hwdec 帧，表现为「有声音无画面」（音频走 audiounit 仍正常）。
+        // 这里与官方包对齐；开关按依赖是否真正产出来 gate，避免依赖缺失时 meson 配置阶段硬失败。
+        let hasVulkan = dependencyIsBuilt(.vulkan, platform: platform, arch: arch)
+        let hasPlacebo = dependencyIsBuilt(.libplacebo, platform: platform, arch: arch)
+        return [
+            "-Dvulkan=\(hasVulkan ? "enabled" : "disabled")",
+            "-Dmoltenvk=\(hasVulkan ? "enabled" : "disabled")",
+            "-Dvideotoolbox-pl=\(hasPlacebo ? "enabled" : "disabled")",
+            "-Dios-gl=\(platform == .macos ? "disabled" : "enabled")",
         ]
     }
 
