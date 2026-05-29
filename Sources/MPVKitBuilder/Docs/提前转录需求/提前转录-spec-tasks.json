@@ -1,0 +1,432 @@
+{
+  "version": 2,
+  "title": "提前转录 · 补丁取超前 PCM 验证（PoC）",
+  "phases": [
+    {
+      "num": 1,
+      "title": "前置事实与策略（已核实）",
+      "tasks": [
+        {
+          "id": "t1-cursor-feasible",
+          "title": "demux 前向只读游标可行性（两路径共用基础）",
+          "desc": "已读 libmpv v0.41.0 demux 源码确认：可为选中音频流加前向只读游标，遍历预读缓存中超前于播放头的包。路径一/路径二都靠这一机制取超前包。",
+          "status": "done",
+          "deps": [],
+          "completedAt": "",
+          "details": [
+            {
+              "title": "事实",
+              "items": [
+                "demux.c:362 struct demux_stream 每流唯一 reader_head（:393 'current decoder position'），是 queue 包单链表（dp->next）游标。",
+                "prune_old_packets（demux.c:2292）只从 queue->head 删到 reader_head 为止（:2350），reader_head→tail 的前向缓冲永不被裁剪，只随主播放推进释放。",
+                "前向预读深度由 demuxer-readahead-secs(→min_secs, demux.c:97/2458)、demuxer-max-bytes(→max_bytes, :99) 控制；预读判断按每条 eager 流计（:2189）。",
+                "sh_stream->codec（stheader.h:43）= mp_codec_params，含 extradata/extradata_size、native_tb_num/den，且带 struct AVCodecParameters *lav_codecpar（stheader.h:92）。"
+              ]
+            },
+            {
+              "title": "基于事实的演绎推理",
+              "items": [
+                "因为裁剪只发生在 reader_head 之后、前向包永不被裁剪，所以前向只读游标读到的包天然保活，不需要新增裁剪/生命周期逻辑——两路径共用此机制取超前包。",
+                "因为 sh_stream->codec 直接带 lav_codecpar 与 extradata，所以路径二有现成的解码参数来源。"
+              ]
+            },
+            {
+              "title": "验证",
+              "items": [
+                "已读 demux/demux.c 与 stheader.h，定位 reader_head / demux_queue / prune_old_packets / min_secs / lav_codecpar 并给出可行结论与行号。",
+                "结论：可加前向只读游标（只前进、不回退、不驱动主 reader_head）。"
+              ]
+            },
+            { "title": "证据缺口", "items": [] },
+            {
+              "title": "验收边界",
+              "items": [ "只产出源码可行性结论，不实现补丁。" ]
+            },
+            {
+              "title": "交付物",
+              "items": [
+                "可行性结论：前向只读游标可行，复用既有前向缓冲保活，无需新增裁剪逻辑。",
+                "实现约束：只前进/不回退/不驱动主 reader_head；取包须在 in->lock 内取引用或拷贝、解锁后再用；seek 与 range 合并（demux.c:~1693-1773）后须重锚游标。",
+                "codec 参数路径：sh_stream->codec->lav_codecpar + extradata + native_tb 足够下游解码器初始化。",
+                "新约束：mpv 无 per-stream readahead 旋钮，领先 N 秒需调大全局 demuxer-readahead-secs，会连带缓存 N 秒视频包。"
+              ]
+            },
+            {
+              "title": "任务总结",
+              "items": [
+                "两路径补丁的共用基础（前向只读游标）已确认可行。",
+                "领先量上限受全局 readahead 连带缓存视频的内存代价约束，留待工程阶段调参。"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "t1-analyzer-gate",
+          "title": "SpeechAnalyzer 吞吐门槛决策（非阻塞）",
+          "desc": "用户决策：Speech API 性能较好，吞吐视为 >1x；即便退化为 1x 也可接受，不作为验证阶段的阻塞门槛。",
+          "status": "done",
+          "deps": [],
+          "completedAt": "",
+          "details": [
+            {
+              "title": "事实",
+              "items": [
+                "IovisPCMTapPatch.md §6 记载 SpeechAnalyzer/SpeechTranscriber 为 26.0+ 本地识别；§7/实测结论记载实时转录链路已在 tvOS 真机打通。",
+                "用户决策（2026-05-29）：吞吐视为 >1x、退化 1x 可接受，不作为阻塞门槛。"
+              ]
+            },
+            {
+              "title": "基于事实的演绎推理",
+              "items": [
+                "因为用户已将吞吐判定为非阻塞，验证阶段不需要先实测吞吐倍率；提前/领先的稳态调速属工程阶段，不纳入本 PoC。"
+              ]
+            },
+            {
+              "title": "验证",
+              "items": [ "无需吞吐实测门槛；验证阶段只要求 PCM 能转出文本。" ]
+            },
+            { "title": "证据缺口", "items": [] },
+            {
+              "title": "验收边界",
+              "items": [ "只记录门槛决策，不实现调速/领先逻辑（工程阶段）。" ]
+            },
+            {
+              "title": "交付物",
+              "items": [ "决策记录：吞吐非阻塞门槛，>1x 视为成立、1x 可接受。" ]
+            },
+            {
+              "title": "任务总结",
+              "items": [ "吞吐不作为 PoC 阻塞项；领先调速留待工程阶段。" ]
+            }
+          ]
+        },
+        {
+          "id": "t1-ffmpeg-import",
+          "title": "IovisKit 可直接 import FFmpeg 模块（路径二解包用）",
+          "desc": "已核实 MPVKit 把 Libavcodec/Libavformat/Libavutil/Libswresample 以 framework modulemap 暴露，IovisKit 可像 import Libmpv 一样 import 它们解码。",
+          "status": "done",
+          "deps": [],
+          "completedAt": "",
+          "details": [
+            {
+              "title": "事实",
+              "items": [
+                "MPVKit 产品(_MPVKit) 经 _FFmpeg 传递依赖 Libavcodec/Libavformat/Libavutil/Libswresample（MPVKit Package.swift:103-115 binaryTarget）。",
+                "各 FFmpeg xcframework 带 framework module …[system]{umbrella \".\";export *} modulemap（与已用的 Libmpv 同形），被 exclude 的仅 HW 加速头，音频解码 API 不受影响。",
+                "IovisKit 现有代码仅 import Libmpv（IovisPlayer*.swift），证明经 MPVKit 产品 import binaryTarget 模块的路径已通。"
+              ]
+            },
+            {
+              "title": "基于事实的演绎推理",
+              "items": [
+                "因为 FFmpeg 模块已以 modulemap 暴露且 import Libmpv 路径已验证，所以路径二在 IovisKit 内 import Libavcodec 解压缩包可行，无需额外暴露或自带 FFmpeg。"
+              ]
+            },
+            {
+              "title": "验证",
+              "items": [
+                "已核实 MPVKit Package.swift 与各 FFmpeg framework 的 modulemap 内容。",
+                "结论：import Libavcodec/Libavformat/Libavutil/Libswresample 在 Swift 可用。"
+              ]
+            },
+            { "title": "证据缺口", "items": [] },
+            {
+              "title": "验收边界",
+              "items": [ "只确认模块可 import，不实现解码代码。" ]
+            },
+            {
+              "title": "交付物",
+              "items": [ "结论：IovisKit 可 import Libavcodec 等 FFmpeg 模块，路径二解包不缺基础设施。" ]
+            },
+            {
+              "title": "任务总结",
+              "items": [ "路径二在 IovisKit 侧解压缩包的依赖已具备。" ]
+            }
+          ]
+        },
+        {
+          "id": "t1-patch-packaging",
+          "title": "打包/编译策略：单 patch、编一次、运行时切换两路径",
+          "desc": "已核实补丁应用机制，决定两路径合入单个 patch（前向游标 + 路径一/二两回调），编译一次出包，运行时按注册哪个回调切换路径。",
+          "status": "done",
+          "deps": [],
+          "completedAt": "",
+          "details": [
+            {
+              "title": "事实",
+              "items": [
+                "Builder.preCompile()（Builder.swift:50）收集 Patch/libmpv/ 下所有 *.patch、按文件名排序、逐个 applyPatchIfNeeded（:280）git apply --check 后 apply。",
+                "两路径补丁都要改 demux.c（前向游标）、meson.build 并新增回调源文件；拆成两个 *.patch 文件会改同一批文件，第二个 git apply --check 因 hunk 重叠/新增文件已存在而失败。",
+                "现有 0001-add-iovis-pcm-tap.patch 已示范单槽回调运行时开关（IovisPCMTapPatch.md §3/§11：注册哪个回调即切换消费者）。",
+                "全量 libmpv 重编需 force=libmpv（IovisPCMTapPatch.md §4），单次出包成本高。"
+              ]
+            },
+            {
+              "title": "基于事实的演绎推理",
+              "items": [
+                "因为分开的 patch 文件改同一批文件会冲突、共用前向游标会在两文件间分叉、且重编昂贵，所以做成单个 patch：共用前向游标 + 路径一/二两回调，运行时按注册哪个回调切换；编译一次、两路径都可验证。"
+              ]
+            },
+            {
+              "title": "验证",
+              "items": [
+                "决策记录；后续 p-patch 产单 patch、p-build 单次出包并 nm 校验两组符号。"
+              ]
+            },
+            { "title": "证据缺口", "items": [] },
+            {
+              "title": "验收边界",
+              "items": [ "只定打包/编译策略，不实现补丁。" ]
+            },
+            {
+              "title": "交付物",
+              "items": [
+                "决策：单 patch 文件（前向游标 + 路径一 PCM 回调 + 路径二压缩包回调），运行时按注册回调切换。",
+                "编译一次出包，nm 校验两组符号；A/B 切换在 IovisKit 改注册的回调即可（仿 §11）。",
+                "缩小首次编译面的可选做法：同一 patch 文件内先落游标+路径二、验证后再扩路径一，仍是单文件、重编一次。"
+              ]
+            },
+            {
+              "title": "任务总结",
+              "items": [
+                "受补丁应用机制约束，两路径合入单 patch、单次编译、运行时切换是最稳妥方案。"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "num": 2,
+      "title": "补丁实现 + 编译（单 patch，含两路径回调）",
+      "tasks": [
+        {
+          "id": "p-patch",
+          "title": "单 patch：前向游标 + 路径一(内解码→PCM) + 路径二(吐压缩包)",
+          "desc": "一个 patch 内实现共用前向只读游标；路径一在专用线程用裸 libavcodec 解码超前包→按 iovis_tap_chunk 契约吐 PCM；路径二只吐超前压缩包 + lav_codecpar；运行时按注册回调切换。",
+          "status": "planned",
+          "deps": ["t1-cursor-feasible", "t1-patch-packaging"],
+          "completedAt": "",
+          "details": [
+            {
+              "title": "事实",
+              "items": [
+                "t1-cursor-feasible：前向只读游标可行；lav_codecpar/extradata 可得。",
+                "现有 iovis_tap_chunk（patch 内 audio/out/iovis_tap.h）已带 data/samples/channels/samplerate/format(AF_FORMAT_*)/pts_us，路径一可复用此契约。",
+                "ad_lavc.c 重度绑定 mpv filter 框架（#include filters/f_decoder_wrapper.h、filter_internal.h；内嵌 struct mp_decoder public；init(struct mp_filter*…)；mp_filter_info），不宜独立复用；其内部即裸 <libavcodec/avcodec.h> + AVCodecContext。",
+                "mpv 提供 mp_thread（osdep/threads.h, threads-posix）；demux 自身跑在独立 mp_thread（demux.c:171/440）。"
+              ]
+            },
+            {
+              "title": "基于事实的演绎推理",
+              "items": [
+                "因为单 patch 含两路径：共用前向游标取超前包；路径一在专用 mp_thread 内用裸 libavcodec（avcodec_alloc_context3 + avcodec_parameters_to_context(lav_codecpar) + avcodec_open2 + send/receive，必要时 swresample）解码、按 iovis_tap_chunk 契约吐 PCM；路径二只吐压缩包 + lav_codecpar。",
+                "因为 ad_lavc 绑定 filter 框架且解码在 demux 线程会拖慢 demux，所以路径一用裸 libavcodec + 专用线程，不复用 ad_lavc、不占 demux 线程。",
+                "运行时按注册路径一或路径二回调切换（仿现有 iovis_tap 单槽开关）。"
+              ]
+            },
+            {
+              "title": "验证",
+              "items": [
+                "产出单 patch 文件，git apply --check 干净应用（IovisPCMTapPatch.md §4 校验命令）。",
+                "补丁内日志能分别打出：路径一解出的 PCM 帧数/格式/PTS；路径二吐出的包大小/PTS/codec 概要。"
+              ]
+            },
+            { "title": "证据缺口", "items": [] },
+            {
+              "title": "验收边界",
+              "items": [
+                "只产出补丁本体（含两回调）；编译/拿 PCM 在后续任务。",
+                "不含领先调速、字幕存储、显示同步、seek/track（工程阶段）。"
+              ]
+            },
+            { "title": "交付物", "items": [] },
+            { "title": "任务总结", "items": [] }
+          ]
+        },
+        {
+          "id": "p-build",
+          "title": "编译一次出包 + 两组符号校验",
+          "desc": "应用单 patch 重编 libmpv 出包一次，nm 同时确认路径一 PCM 回调与路径二压缩包回调符号都在目标 slice。",
+          "status": "planned",
+          "deps": ["p-patch"],
+          "completedAt": "",
+          "details": [
+            {
+              "title": "事实",
+              "items": [
+                "IovisPCMTapPatch.md §4 记载 make build only=libmpv force=libmpv platform=...（force 必带）与 nm dist/Libmpv.xcframework/<slice>/Libmpv.framework/Libmpv | grep 校验命令。"
+              ]
+            },
+            {
+              "title": "基于事实的演绎推理",
+              "items": [
+                "因为单 patch 含两回调，所以编译一次即可；nm 须同时确认两组回调符号在目标 slice，否则后续桥接拿不到。"
+              ]
+            },
+            {
+              "title": "验证",
+              "items": [
+                "make build only=libmpv force=libmpv platform=tvossimulator（或先 macos 验逻辑）成功出包。",
+                "nm 同时找到路径一 PCM 回调与路径二压缩包回调符号。",
+                "git apply --check 对该补丁幂等（已应用可跳过）。"
+              ]
+            },
+            { "title": "证据缺口", "items": [] },
+            {
+              "title": "验收边界",
+              "items": [ "只覆盖出包与符号校验。" ]
+            },
+            { "title": "交付物", "items": [] },
+            { "title": "任务总结", "items": [] }
+          ]
+        }
+      ]
+    },
+    {
+      "num": 3,
+      "title": "路径一 · IovisKit 直接拿到 PCM",
+      "tasks": [
+        {
+          "id": "pA-pcm",
+          "title": "路径一：桥接回调直接拿 PCM 并验证",
+          "desc": "IovisKit 桥接路径一回调，直接拿到自描述 PCM（chunk 带 format/channels/samplerate），dump WAV 验字节，断言 PTS 超前播放位置。",
+          "status": "planned",
+          "deps": ["p-build"],
+          "completedAt": "",
+          "details": [
+            {
+              "title": "事实",
+              "items": [
+                "IovisPCMTapPatch.md §5.2 给出 C target 重声明 mpv 内部符号的桥接范式（IovisTapBridge）。",
+                "IovisPCMTapPatch.md §5.4/§7 给出 dump WAV + 原始 TCP 推回 Mac 及 tvOS 取文件坑（Documents 不可写、用 Library/Caches 或 TCP）。",
+                "路径一回调按 iovis_tap_chunk 契约给出 PCM，chunk 自带 format(AF_FORMAT_*)/channels/samplerate，PCM 自描述。",
+                "IovisPlayer.currentTime（IovisPlayer.swift:37）可作当前播放位置参照。"
+              ]
+            },
+            {
+              "title": "基于事实的演绎推理",
+              "items": [
+                "因为路径一已在 mpv 内解码且 chunk 自带格式字段，所以 IovisKit 桥接即得自描述 PCM，按 format 分支处理（若补丁内已 swresample 为 float 则更简单）；dump WAV 验字节、PTS>currentTime 验超前。"
+              ]
+            },
+            {
+              "title": "验证",
+              "items": [
+                "桥接回调拿到 PCM，dump 成 WAV 在 Mac 可听、非噪声。",
+                "按 chunk.format/channels/samplerate 正确解读（覆盖实际格式如 floatp）。",
+                "断言回调 chunk 的 PTS 超前于当前 IovisPlayer.currentTime。"
+              ]
+            },
+            { "title": "证据缺口", "items": [] },
+            {
+              "title": "验收边界",
+              "items": [
+                "只验证“能直接拿到超前 PCM 且字节正确”，不含转录（p-asr）、不含调速/存储。"
+              ]
+            },
+            { "title": "交付物", "items": [] },
+            { "title": "任务总结", "items": [] }
+          ]
+        }
+      ]
+    },
+    {
+      "num": 4,
+      "title": "路径二 · IovisKit 解压缩包出 PCM",
+      "tasks": [
+        {
+          "id": "pD-pcm",
+          "title": "路径二：桥接拿压缩包，import Libavcodec 解出 PCM 并验证",
+          "desc": "IovisKit 桥接路径二回调拿压缩包 + AVCodecParameters（可直接 import 用，无需手抄 codecpar），import Libavcodec 解出 PCM，dump WAV 验字节，断言 PTS 超前播放位置。",
+          "status": "planned",
+          "deps": ["p-build", "t1-ffmpeg-import"],
+          "completedAt": "",
+          "details": [
+            {
+              "title": "事实",
+              "items": [
+                "t1-ffmpeg-import 已确认 IovisKit 可 import Libavcodec 等。",
+                "codec_par.h 在 Libavcodec 模块内未被 exclude（avcodec.h:53 #include codec_par.h）→ AVCodecParameters 在 IovisKit 可直接用，无需手抄该结构。",
+                "mpv 与 IovisKit 共用同一份 MPVKit FFmpeg xcframework → FFmpeg ABI 一致，AVCodecParameters* 可跨边界传递/读取。",
+                "IovisPCMTapPatch.md §5.2 桥接范式（仅需手抄新回调符号 + 薄 chunk 包装结构）；§5.4/§7 dump WAV + TCP 推回。",
+                "IovisPlayer.currentTime（IovisPlayer.swift:37）。"
+              ]
+            },
+            {
+              "title": "基于事实的演绎推理",
+              "items": [
+                "因为 AVCodecParameters 两侧是同一 FFmpeg 类型且 ABI 一致，所以路径二回调可直接传 lav_codecpar 指针（或其字段），IovisKit 用 avcodec_alloc_context3 + avcodec_parameters_to_context + avcodec_open2 解压缩包→PCM；手抄桥接只剩回调符号与薄包装结构，codecpar 本身不手抄（消除 §5.2 主要内存风险）。",
+                "因为 lav_codecpar 生命周期随 track，安全起见回调时即读或 avcodec_parameters_copy。"
+              ]
+            },
+            {
+              "title": "验证",
+              "items": [
+                "用回调给的 AVCodecParameters 初始化解码器，解出的 PCM dump 成 WAV 在 Mac 可听、非噪声。",
+                "断言解出帧的 PTS 超前于当前 IovisPlayer.currentTime。"
+              ]
+            },
+            { "title": "证据缺口", "items": [] },
+            {
+              "title": "验收边界",
+              "items": [
+                "只验证“能解出超前 PCM 且字节正确”，不含转录（p-asr）、不含调速/存储。"
+              ]
+            },
+            { "title": "交付物", "items": [] },
+            { "title": "任务总结", "items": [] }
+          ]
+        }
+      ]
+    },
+    {
+      "num": 5,
+      "title": "接入转录验证（收尾）",
+      "tasks": [
+        {
+          "id": "p-asr",
+          "title": "PCM 喂 SpeechTranscriber 出文本（两路径收尾）",
+          "desc": "把路径一/路径二解出的 PCM 喂给 SpeechTranscriber，确认出文本。走到这步即 PoC 完成。",
+          "status": "planned",
+          "deps": ["pA-pcm", "pD-pcm"],
+          "completedAt": "",
+          "details": [
+            {
+              "title": "事实",
+              "items": [
+                "IovisPCMTapPatch.md §6/§12 给出 PCM→AVAudioConverter→AnalyzerInput→SpeechTranscriber.results 的完整链路（IovisLiveTranscriber 已实现）。",
+                "IovisPCMTapPatch.md §7/实测结论记载实时转录链路已在 tvOS 真机打通（出 [volatile]/[final] 文本）。",
+                "两路径 PCM 均自带 samplerate（路径一 chunk.samplerate；路径二 codecpar->sample_rate）→ sourceFormat 可动态建（修 §8.B.1 写死 44100 的 bug）。"
+              ]
+            },
+            {
+              "title": "基于事实的演绎推理",
+              "items": [
+                "因为转录链路本身已验证，本任务只确认两路径新产出的 PCM 同样可转出文本；sourceFormat 须按 samplerate 动态建，至少覆盖实际采样率。"
+              ]
+            },
+            {
+              "title": "验证",
+              "items": [
+                "路径一 PCM 喂 SpeechTranscriber，断言控制台出 [volatile]/[final] 文本。",
+                "路径二 PCM 喂 SpeechTranscriber，断言同样出文本。",
+                "文本与片源语音大致吻合（系统语言与片源语言一致，§7 排错）。"
+              ]
+            },
+            { "title": "证据缺口", "items": [] },
+            {
+              "title": "验收边界",
+              "items": [
+                "走到出文本即 PoC 完成；领先调速、字幕存储、显示同步、seek/track、对齐校准、MVVM-C 落点均属工程阶段，不在本验证。",
+                "转录可用任一路径 PCM 先验证；两路径 PCM 各确认一次。"
+              ]
+            },
+            { "title": "交付物", "items": [] },
+            { "title": "任务总结", "items": [] }
+          ]
+        }
+      ]
+    }
+  ]
+}
