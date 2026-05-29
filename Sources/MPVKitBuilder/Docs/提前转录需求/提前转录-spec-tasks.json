@@ -203,8 +203,8 @@
         {
           "id": "p-patch",
           "title": "单 patch：前向游标 + 路径一(内解码→PCM) + 路径二(吐压缩包)",
-          "desc": "一个 patch 内实现共用前向只读游标；路径一在专用线程用裸 libavcodec 解码超前包→按 iovis_tap_chunk 契约吐 PCM；路径二只吐超前压缩包 + lav_codecpar；运行时按注册回调切换。",
-          "status": "planned",
+          "desc": "一个 patch 内实现两路径取超前包：路径二(吐压缩包+lav_codecpar) + 路径一(专用 mp_thread 裸 libavcodec 解码→PCM 回调)，运行时按注册回调切换。补丁已生成并验证可应用。",
+          "status": "done",
           "deps": ["t1-cursor-feasible", "t1-patch-packaging"],
           "completedAt": "",
           "details": [
@@ -228,8 +228,8 @@
             {
               "title": "验证",
               "items": [
-                "产出单 patch 文件，git apply --check 干净应用（IovisPCMTapPatch.md §4 校验命令）。",
-                "补丁内日志能分别打出：路径一解出的 PCM 帧数/格式/PTS；路径二吐出的包大小/PTS/codec 概要。"
+                "单 patch 0002 单独 git apply --check OK；构建顺序 0001→0002 顺序应用 OK；两特性源文件与 meson 项共存。",
+                "C 编译正确性与运行行为在 p-build / pA-pcm / pD-pcm 验证（本任务边界只到补丁本体可应用）。"
               ]
             },
             { "title": "证据缺口", "items": [] },
@@ -240,8 +240,23 @@
                 "不含领先调速、字幕存储、显示同步、seek/track（工程阶段）。"
               ]
             },
-            { "title": "交付物", "items": [] },
-            { "title": "任务总结", "items": [] }
+            {
+              "title": "交付物",
+              "items": [
+                "0002-add-iovis-lookahead.patch（含两路径）：新增 demux/iovis_lookahead.{h,c} + demux.c 在 add_packet_locked 的 record_packet 后挂 iovis_lookahead_feed（仅 STREAM_AUDIO）+ meson.build 加源；4 files +320。",
+                "挂载点细化：用 add_packet_locked『入队即发』取代独立前向游标——入队点即 readahead 前沿（领先播放头 ~demuxer-readahead-secs），内容此刻有效（disk-cache unref 前），规避游标悬空/被裁剪；dp->pts 为秒，直接对齐 time-pos。",
+                "路径二(Path D)：iovis_lookahead_set_callback 注册；feed 直接吐 struct iovis_la_packet{ data,size,pts,dts,keyframe,codecpar=lav_codecpar,samplerate,channels }（在 demux 锁内，回调须轻量）。",
+                "路径一(Path A)：iovis_lookahead_set_pcm_callback 注册；feed 把包拷进有界队列(cap 1024)，专用 mp_thread 用裸 libavcodec(find_decoder/alloc_context3/parameters_to_context/open2/send/receive) 解码，吐 struct iovis_la_pcm{ data(plane0),samples,channels,samplerate,format=AVSampleFormat,pts }；不占 demux 线程；FFmpeg7 ch_layout API。",
+                "已验证：0002 单独 + 0001→0002 顺序应用均 OK；源码树已还原干净。"
+              ]
+            },
+            {
+              "title": "任务总结",
+              "items": [
+                "两路径合入单 0002 补丁、运行时按注册回调切换；补丁可干净应用（与 0001 共存）。",
+                "C 编译与运行行为尚未验证——下一步 p-build 编译 + nm 校验两组符号（set_callback / set_pcm_callback / feed）。"
+              ]
+            }
           ]
         },
         {

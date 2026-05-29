@@ -1,0 +1,361 @@
+diff --git a/demux/demux.c b/demux/demux.c
+index d1accba..bbdf17e 100644
+--- a/demux/demux.c
++++ b/demux/demux.c
+@@ -28,6 +28,7 @@
+ #include <sys/types.h>
+ 
+ #include "cache.h"
++#include "iovis_lookahead.h"
+ #include "config.h"
+ #include "options/m_config.h"
+ #include "options/m_option.h"
+@@ -2047,6 +2048,9 @@ static void add_packet_locked(struct sh_stream *stream, demux_packet_t *dp)
+ 
+     record_packet(in, dp);
+ 
++    if (ds->type == STREAM_AUDIO)
++        iovis_lookahead_feed(stream, dp);
++
+     if (in->cache && in->d_user->opts->disk_cache && !dp->is_wrapped_avframe) {
+         int64_t pos = demux_cache_write(in->cache, dp);
+         if (pos >= 0) {
+diff --git a/demux/iovis_lookahead.c b/demux/iovis_lookahead.c
+new file mode 100644
+index 0000000..ceed7a4
+--- /dev/null
++++ b/demux/iovis_lookahead.c
+@@ -0,0 +1,256 @@
++/*
++ * iovis look-ahead audio tap. See iovis_lookahead.h for the contract.
++ *
++ * Read-only with respect to mpv's demuxer: never mutates packets/queue, never
++ * advances the decoder reader_head. No effect unless a callback is set.
++ *
++ *   Path D: emit the compressed packet + codec params (consumer decodes).
++ *   Path A: copy the packet into a queue; a worker thread decodes it with
++ *           libavcodec and emits PCM frames (decoding is kept off the demux
++ *           thread so demuxing is never stalled).
++ */
++#include <stdatomic.h>
++#include <stddef.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include <libavcodec/avcodec.h>
++#include <libavutil/avutil.h>
++#include <libavutil/frame.h>
++#include <libavutil/mem.h>
++
++#include "iovis_lookahead.h"
++#include "demux/packet.h"
++#include "demux/stheader.h"
++#include "osdep/threads.h"
++
++// ===================== Path D: raw compressed packet =====================
++
++static _Atomic(iovis_la_callback) g_pkt_cb = NULL;
++static _Atomic(void *) g_pkt_user = NULL;
++
++void iovis_lookahead_set_callback(iovis_la_callback cb, void *user)
++{
++    atomic_store(&g_pkt_user, user);
++    atomic_store(&g_pkt_cb, cb);
++}
++
++static void feed_packet_path(struct sh_stream *sh, struct demux_packet *dp)
++{
++    iovis_la_callback cb = atomic_load(&g_pkt_cb);
++    if (!cb)
++        return;
++    struct mp_codec_params *c = sh->codec;
++    struct iovis_la_packet pkt = {
++        .data       = dp->buffer,
++        .size       = (int)dp->len,
++        .pts        = dp->pts,
++        .dts        = dp->dts,
++        .keyframe   = dp->keyframe,
++        .codecpar   = c ? c->lav_codecpar : NULL,
++        .samplerate = c ? c->samplerate : 0,
++        .channels   = c ? c->channels.num : 0,
++    };
++    cb(atomic_load(&g_pkt_user), &pkt);
++}
++
++// ===================== Path A: decode in mpv =====================
++
++#define IOVIS_LA_QUEUE_CAP 1024     // PoC backpressure: drop new packets past this
++
++struct la_node {
++    uint8_t *data;          // av_malloc'd: size + AV_INPUT_BUFFER_PADDING_SIZE
++    int size;
++    double pts;
++    struct la_node *next;
++};
++
++static atomic_bool g_pcm_active = false;    // hot-path fast check (feed)
++static bool g_started = false;              // sync primitives + worker created
++static mp_mutex g_lock;
++static mp_cond g_cond;
++static mp_thread g_thread;
++static bool g_run = false;                  // worker should keep running (g_lock)
++static struct la_node *g_head = NULL, *g_tail = NULL;   // queue (g_lock)
++static int g_count = 0;                                 // queue length (g_lock)
++static iovis_la_pcm_callback g_pcm_cb = NULL;           // (g_lock)
++static void *g_pcm_user = NULL;                         // (g_lock)
++static AVCodecParameters *g_par = NULL;                 // captured once (g_lock)
++
++static void free_queue_locked(void)
++{
++    struct la_node *n = g_head;
++    while (n) {
++        struct la_node *nx = n->next;
++        av_free(n->data);
++        free(n);
++        n = nx;
++    }
++    g_head = g_tail = NULL;
++    g_count = 0;
++}
++
++static MP_THREAD_VOID pcm_worker(void *arg)
++{
++    (void)arg;
++    AVCodecContext *ctx = NULL;
++    AVPacket *pkt = av_packet_alloc();
++    AVFrame *frame = av_frame_alloc();
++
++    mp_mutex_lock(&g_lock);
++    while (g_run) {
++        while (g_run && !g_head)
++            mp_cond_wait(&g_cond, &g_lock);
++        if (!g_run)
++            break;
++
++        struct la_node *n = g_head;
++        g_head = n->next;
++        if (!g_head)
++            g_tail = NULL;
++        g_count--;
++
++        if (!ctx && g_par) {
++            const AVCodec *dec = avcodec_find_decoder(g_par->codec_id);
++            if (dec) {
++                ctx = avcodec_alloc_context3(dec);
++                if (ctx && (avcodec_parameters_to_context(ctx, g_par) < 0 ||
++                            avcodec_open2(ctx, dec, NULL) < 0)) {
++                    avcodec_free_context(&ctx);
++                    ctx = NULL;
++                }
++            }
++        }
++        iovis_la_pcm_callback cb = g_pcm_cb;
++        void *user = g_pcm_user;
++        mp_mutex_unlock(&g_lock);
++
++        if (ctx && pkt && frame && cb) {
++            pkt->data = n->data;
++            pkt->size = n->size;
++            pkt->pts  = AV_NOPTS_VALUE;
++            pkt->dts  = AV_NOPTS_VALUE;
++            if (avcodec_send_packet(ctx, pkt) == 0) {
++                while (avcodec_receive_frame(ctx, frame) == 0) {
++                    struct iovis_la_pcm pcm = {
++                        .data       = frame->data[0],
++                        .samples    = frame->nb_samples,
++                        .channels   = frame->ch_layout.nb_channels,
++                        .samplerate = frame->sample_rate,
++                        .format     = frame->format,
++                        .pts        = n->pts,
++                    };
++                    cb(user, &pcm);
++                    av_frame_unref(frame);
++                }
++            }
++        }
++        av_free(n->data);
++        free(n);
++
++        mp_mutex_lock(&g_lock);
++    }
++    mp_mutex_unlock(&g_lock);
++
++    if (ctx)
++        avcodec_free_context(&ctx);
++    av_packet_free(&pkt);
++    av_frame_free(&frame);
++    MP_THREAD_RETURN();
++}
++
++void iovis_lookahead_set_pcm_callback(iovis_la_pcm_callback cb, void *user)
++{
++    if (cb) {
++        if (!g_started) {
++            mp_mutex_init(&g_lock);
++            mp_cond_init(&g_cond);
++            g_started = true;
++        }
++        mp_mutex_lock(&g_lock);
++        g_pcm_cb = cb;
++        g_pcm_user = user;
++        bool need_thread = !g_run;
++        if (need_thread)
++            g_run = true;
++        mp_mutex_unlock(&g_lock);
++
++        if (need_thread) {
++            if (mp_thread_create(&g_thread, pcm_worker, NULL) != 0) {
++                mp_mutex_lock(&g_lock);
++                g_run = false;
++                mp_mutex_unlock(&g_lock);
++                return;
++            }
++        }
++        atomic_store(&g_pcm_active, true);
++    } else {
++        atomic_store(&g_pcm_active, false);
++        if (!g_started)
++            return;
++        mp_mutex_lock(&g_lock);
++        bool was_running = g_run;
++        g_run = false;
++        g_pcm_cb = NULL;
++        g_pcm_user = NULL;
++        mp_cond_broadcast(&g_cond);
++        mp_mutex_unlock(&g_lock);
++
++        if (was_running)
++            mp_thread_join(g_thread);
++
++        mp_mutex_lock(&g_lock);
++        free_queue_locked();
++        if (g_par)
++            avcodec_parameters_free(&g_par);
++        mp_mutex_unlock(&g_lock);
++    }
++}
++
++static void feed_pcm_path(struct sh_stream *sh, struct demux_packet *dp)
++{
++    if (!atomic_load(&g_pcm_active))
++        return;
++
++    mp_mutex_lock(&g_lock);
++    if (!g_run || g_count >= IOVIS_LA_QUEUE_CAP) {
++        mp_mutex_unlock(&g_lock);
++        return;
++    }
++    if (!g_par && sh->codec && sh->codec->lav_codecpar) {
++        g_par = avcodec_parameters_alloc();
++        if (g_par)
++            avcodec_parameters_copy(g_par, sh->codec->lav_codecpar);
++    }
++    struct la_node *n = malloc(sizeof(*n));
++    if (n) {
++        n->data = av_malloc((size_t)dp->len + AV_INPUT_BUFFER_PADDING_SIZE);
++        if (n->data) {
++            memcpy(n->data, dp->buffer, dp->len);
++            memset(n->data + dp->len, 0, AV_INPUT_BUFFER_PADDING_SIZE);
++            n->size = (int)dp->len;
++            n->pts  = dp->pts;
++            n->next = NULL;
++            if (g_tail)
++                g_tail->next = n;
++            else
++                g_head = n;
++            g_tail = n;
++            g_count++;
++            mp_cond_signal(&g_cond);
++        } else {
++            free(n);
++        }
++    }
++    mp_mutex_unlock(&g_lock);
++}
++
++// ===================== shared entry =====================
++
++void iovis_lookahead_feed(struct sh_stream *sh, struct demux_packet *dp)
++{
++    if (!sh || !dp || dp->is_cached || !dp->buffer || dp->len == 0)
++        return;
++    feed_packet_path(sh, dp);
++    feed_pcm_path(sh, dp);
++}
+diff --git a/demux/iovis_lookahead.h b/demux/iovis_lookahead.h
+new file mode 100644
+index 0000000..fd4f680
+--- /dev/null
++++ b/demux/iovis_lookahead.h
+@@ -0,0 +1,59 @@
++/*
++ * iovis look-ahead audio tap (read-side, decode-ahead-of-playback).
++ *
++ * Hooks the demuxer's read-ahead frontier: every selected-audio packet mpv adds
++ * to its packet queue (which sits ahead of the decoder/playhead by up to
++ * --demuxer-readahead-secs) is handed out for pre-transcription. pts/dts are
++ * mpv-internal seconds and line up with the time-pos property.
++ *
++ * Two consumption paths, selected at runtime by which callback is registered:
++ *   Path D (packet): emit the compressed packet + codec params; consumer decodes.
++ *   Path A (pcm):    decode inside mpv on a worker thread; emit PCM frames.
++ *
++ * Default: off. With no callback registered this is a no-op and does not affect
++ * demuxing or playback. Callbacks for Path D run on mpv's demuxer thread while
++ * the demuxer lock is held and MUST be cheap / MUST NOT block or re-enter mpv.
++ * Path A's PCM callback runs on a dedicated worker thread (not the demux thread).
++ */
++#ifndef MP_IOVIS_LOOKAHEAD_H
++#define MP_IOVIS_LOOKAHEAD_H
++
++#include <stdbool.h>
++#include <stdint.h>
++
++struct sh_stream;
++struct demux_packet;
++struct AVCodecParameters;
++
++// ---- Path D: compressed packet out, consumer decodes ----
++struct iovis_la_packet {
++    const uint8_t *data;                // compressed bytes (this packet only)
++    int size;                           // bytes in data
++    double pts;                         // seconds, mpv time (== time-pos); may be MP_NOPTS_VALUE
++    double dts;                         // seconds; may be MP_NOPTS_VALUE
++    bool keyframe;
++    struct AVCodecParameters *codecpar; // FFmpeg decoder params; lifetime = track, copy if retained
++    int samplerate;
++    int channels;
++};
++typedef void (*iovis_la_callback)(void *user, const struct iovis_la_packet *pkt);
++void iovis_lookahead_set_callback(iovis_la_callback cb, void *user);
++
++// ---- Path A: decode in mpv, PCM out ----
++// format is an AVSampleFormat (consumer links libavutil). For planar formats
++// data is plane 0 only (first cut). pts is mpv seconds (== time-pos).
++struct iovis_la_pcm {
++    const uint8_t *data;                // plane 0 / interleaved buffer
++    int samples;                        // samples per channel
++    int channels;
++    int samplerate;
++    int format;                         // enum AVSampleFormat
++    double pts;                         // seconds (== time-pos); may be MP_NOPTS_VALUE
++};
++typedef void (*iovis_la_pcm_callback)(void *user, const struct iovis_la_pcm *pcm);
++void iovis_lookahead_set_pcm_callback(iovis_la_pcm_callback cb, void *user);
++
++// Internal: called by demux.c for each selected-audio packet at the readahead frontier.
++void iovis_lookahead_feed(struct sh_stream *sh, struct demux_packet *dp);
++
++#endif
+diff --git a/meson.build b/meson.build
+index fb10be5..838e28a 100644
+--- a/meson.build
++++ b/meson.build
+@@ -93,6 +93,7 @@ sources = files(
+     'demux/cue.c',
+     'demux/cache.c',
+     'demux/demux.c',
++    'demux/iovis_lookahead.c',
+     'demux/demux_cue.c',
+     'demux/demux_disc.c',
+     'demux/demux_edl.c',
