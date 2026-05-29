@@ -37,10 +37,15 @@
                 "结论：可加前向只读游标（只前进、不回退、不驱动主 reader_head）。"
               ]
             },
-            { "title": "证据缺口", "items": [] },
+            {
+              "title": "证据缺口",
+              "items": []
+            },
             {
               "title": "验收边界",
-              "items": [ "只产出源码可行性结论，不实现补丁。" ]
+              "items": [
+                "只产出源码可行性结论，不实现补丁。"
+              ]
             },
             {
               "title": "交付物",
@@ -83,20 +88,31 @@
             },
             {
               "title": "验证",
-              "items": [ "无需吞吐实测门槛；验证阶段只要求 PCM 能转出文本。" ]
+              "items": [
+                "无需吞吐实测门槛；验证阶段只要求 PCM 能转出文本。"
+              ]
             },
-            { "title": "证据缺口", "items": [] },
+            {
+              "title": "证据缺口",
+              "items": []
+            },
             {
               "title": "验收边界",
-              "items": [ "只记录门槛决策，不实现调速/领先逻辑（工程阶段）。" ]
+              "items": [
+                "只记录门槛决策，不实现调速/领先逻辑（工程阶段）。"
+              ]
             },
             {
               "title": "交付物",
-              "items": [ "决策记录：吞吐非阻塞门槛，>1x 视为成立、1x 可接受。" ]
+              "items": [
+                "决策记录：吞吐非阻塞门槛，>1x 视为成立、1x 可接受。"
+              ]
             },
             {
               "title": "任务总结",
-              "items": [ "吞吐不作为 PoC 阻塞项；领先调速留待工程阶段。" ]
+              "items": [
+                "吞吐不作为 PoC 阻塞项；领先调速留待工程阶段。"
+              ]
             }
           ]
         },
@@ -129,18 +145,27 @@
                 "结论：import Libavcodec/Libavformat/Libavutil/Libswresample 在 Swift 可用。"
               ]
             },
-            { "title": "证据缺口", "items": [] },
+            {
+              "title": "证据缺口",
+              "items": []
+            },
             {
               "title": "验收边界",
-              "items": [ "只确认模块可 import，不实现解码代码。" ]
+              "items": [
+                "只确认模块可 import，不实现解码代码。"
+              ]
             },
             {
               "title": "交付物",
-              "items": [ "结论：IovisKit 可 import Libavcodec 等 FFmpeg 模块，路径二解包不缺基础设施。" ]
+              "items": [
+                "结论：IovisKit 可 import Libavcodec 等 FFmpeg 模块，路径二解包不缺基础设施。"
+              ]
             },
             {
               "title": "任务总结",
-              "items": [ "路径二在 IovisKit 侧解压缩包的依赖已具备。" ]
+              "items": [
+                "路径二在 IovisKit 侧解压缩包的依赖已具备。"
+              ]
             }
           ]
         },
@@ -173,10 +198,15 @@
                 "决策记录；后续 p-patch 产单 patch、p-build 单次出包并 nm 校验两组符号。"
               ]
             },
-            { "title": "证据缺口", "items": [] },
+            {
+              "title": "证据缺口",
+              "items": []
+            },
             {
               "title": "验收边界",
-              "items": [ "只定打包/编译策略，不实现补丁。" ]
+              "items": [
+                "只定打包/编译策略，不实现补丁。"
+              ]
             },
             {
               "title": "交付物",
@@ -205,7 +235,10 @@
           "title": "单 patch：前向游标 + 路径一(内解码→PCM) + 路径二(吐压缩包)",
           "desc": "一个 patch 内实现两路径取超前包：路径二(吐压缩包+lav_codecpar) + 路径一(专用 mp_thread 裸 libavcodec 解码→PCM 回调)，运行时按注册回调切换。补丁已生成并验证可应用。",
           "status": "done",
-          "deps": ["t1-cursor-feasible", "t1-patch-packaging"],
+          "deps": [
+            "t1-cursor-feasible",
+            "t1-patch-packaging"
+          ],
           "completedAt": "",
           "details": [
             {
@@ -232,7 +265,10 @@
                 "C 编译正确性与运行行为在 p-build / pA-pcm / pD-pcm 验证（本任务边界只到补丁本体可应用）。"
               ]
             },
-            { "title": "证据缺口", "items": [] },
+            {
+              "title": "证据缺口",
+              "items": []
+            },
             {
               "title": "验收边界",
               "items": [
@@ -263,9 +299,11 @@
           "id": "p-build",
           "title": "编译一次出包 + 两组符号校验",
           "desc": "应用单 patch 重编 libmpv 出包一次，nm 同时确认路径一 PCM 回调与路径二压缩包回调符号都在目标 slice。",
-          "status": "planned",
-          "deps": ["p-patch"],
-          "completedAt": "",
+          "status": "done",
+          "deps": [
+            "p-patch"
+          ],
+          "completedAt": "2026.05.29 21:29",
           "details": [
             {
               "title": "事实",
@@ -287,13 +325,24 @@
                 "git apply --check 对该补丁幂等（已应用可跳过）。"
               ]
             },
-            { "title": "证据缺口", "items": [] },
+            {
+              "title": "证据缺口",
+              "items": []
+            },
             {
               "title": "验收边界",
-              "items": [ "只覆盖出包与符号校验。" ]
+              "items": [
+                "只覆盖出包与符号校验。"
+              ]
             },
-            { "title": "交付物", "items": [] },
-            { "title": "任务总结", "items": [] }
+            {
+              "title": "交付物",
+              "items": []
+            },
+            {
+              "title": "任务总结",
+              "items": []
+            }
           ]
         }
       ]
@@ -307,7 +356,9 @@
           "title": "路径一：桥接回调直接拿 PCM 并验证",
           "desc": "IovisKit 桥接路径一回调，直接拿到自描述 PCM（chunk 带 format/channels/samplerate），dump WAV 验字节，断言 PTS 超前播放位置。",
           "status": "planned",
-          "deps": ["p-build"],
+          "deps": [
+            "p-build"
+          ],
           "completedAt": "",
           "details": [
             {
@@ -333,15 +384,24 @@
                 "断言回调 chunk 的 PTS 超前于当前 IovisPlayer.currentTime。"
               ]
             },
-            { "title": "证据缺口", "items": [] },
+            {
+              "title": "证据缺口",
+              "items": []
+            },
             {
               "title": "验收边界",
               "items": [
                 "只验证“能直接拿到超前 PCM 且字节正确”，不含转录（p-asr）、不含调速/存储。"
               ]
             },
-            { "title": "交付物", "items": [] },
-            { "title": "任务总结", "items": [] }
+            {
+              "title": "交付物",
+              "items": []
+            },
+            {
+              "title": "任务总结",
+              "items": []
+            }
           ]
         }
       ]
@@ -355,7 +415,10 @@
           "title": "路径二：桥接拿压缩包，import Libavcodec 解出 PCM 并验证",
           "desc": "IovisKit 桥接路径二回调拿压缩包 + AVCodecParameters（可直接 import 用，无需手抄 codecpar），import Libavcodec 解出 PCM，dump WAV 验字节，断言 PTS 超前播放位置。",
           "status": "planned",
-          "deps": ["p-build", "t1-ffmpeg-import"],
+          "deps": [
+            "p-build",
+            "t1-ffmpeg-import"
+          ],
           "completedAt": "",
           "details": [
             {
@@ -382,15 +445,24 @@
                 "断言解出帧的 PTS 超前于当前 IovisPlayer.currentTime。"
               ]
             },
-            { "title": "证据缺口", "items": [] },
+            {
+              "title": "证据缺口",
+              "items": []
+            },
             {
               "title": "验收边界",
               "items": [
                 "只验证“能解出超前 PCM 且字节正确”，不含转录（p-asr）、不含调速/存储。"
               ]
             },
-            { "title": "交付物", "items": [] },
-            { "title": "任务总结", "items": [] }
+            {
+              "title": "交付物",
+              "items": []
+            },
+            {
+              "title": "任务总结",
+              "items": []
+            }
           ]
         }
       ]
@@ -404,7 +476,10 @@
           "title": "PCM 喂 SpeechTranscriber 出文本（两路径收尾）",
           "desc": "把路径一/路径二解出的 PCM 喂给 SpeechTranscriber，确认出文本。走到这步即 PoC 完成。",
           "status": "planned",
-          "deps": ["pA-pcm", "pD-pcm"],
+          "deps": [
+            "pA-pcm",
+            "pD-pcm"
+          ],
           "completedAt": "",
           "details": [
             {
@@ -429,7 +504,10 @@
                 "文本与片源语音大致吻合（系统语言与片源语言一致，§7 排错）。"
               ]
             },
-            { "title": "证据缺口", "items": [] },
+            {
+              "title": "证据缺口",
+              "items": []
+            },
             {
               "title": "验收边界",
               "items": [
@@ -437,8 +515,14 @@
                 "转录可用任一路径 PCM 先验证；两路径 PCM 各确认一次。"
               ]
             },
-            { "title": "交付物", "items": [] },
-            { "title": "任务总结", "items": [] }
+            {
+              "title": "交付物",
+              "items": []
+            },
+            {
+              "title": "任务总结",
+              "items": []
+            }
           ]
         }
       ]
