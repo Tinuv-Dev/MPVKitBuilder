@@ -1,0 +1,3011 @@
+<!doctype html>
+<html lang="zh">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>规格驱动任务规划面板</title>
+  <style>
+    :root {
+      --bg: #fafafa;
+      --fg: #1f2937;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --card: #ffffff;
+      --done: #10b981;
+      --done-bg: #ecfdf5;
+      /* 可开工 = 黄色，进行中 = 蓝色 */
+      --ip: #3b82f6;
+      --ip-bg: #eff6ff;
+      --ready: #f59e0b;
+      --ready-bg: #fffbeb;
+      --blocked: #ef4444;
+      --blocked-bg: #fef2f2;
+      --blocked-badge-bg: #fee2e2;
+      --accent: #6366f1;
+      --focus: #3b82f6;
+      --progress-start: #ef4444;
+      --progress-mid: #f59e0b;
+      --progress-end: #10b981;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font: 14px/1.55 -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft Yahei", sans-serif;
+      color: var(--fg);
+      background: var(--bg);
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: #fff;
+      border-bottom: 1px solid var(--border);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .04);
+    }
+
+    .header-summary {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-height: 62px;
+      padding: 12px 24px;
+    }
+
+    .header-title-block {
+      min-width: 0;
+      flex: 1 1 420px;
+    }
+
+    header h1 {
+      margin: 0 0 5px;
+      font-size: 18px;
+      line-height: 1.25;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .header-compact {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      min-height: 20px;
+      color: var(--muted);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .header-compact span {
+      display: inline-flex;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .header-compact span + span::before {
+      content: '';
+      width: 3px;
+      height: 3px;
+      margin-right: 8px;
+      border-radius: 50%;
+      background: #cbd5e1;
+    }
+
+    .header-stage-summary.formal {
+      color: var(--done);
+      font-weight: 600;
+    }
+
+    .header-stage-summary.draft {
+      color: var(--ready);
+      font-weight: 600;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 0 0 auto;
+      margin-left: auto;
+    }
+
+    .header-actions button {
+      height: 32px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--fg);
+      border-radius: 6px;
+      padding: 0 11px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12.5px;
+      white-space: nowrap;
+    }
+
+    .header-actions button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .header-actions #export-png {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .header-actions #export-png:hover {
+      filter: brightness(.96);
+      color: #fff;
+    }
+
+    .header-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .header-toggle-icon {
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .header-panel {
+      max-height: 1000px;
+      overflow: hidden;
+      padding: 0 24px 16px;
+      opacity: 1;
+      transition: max-height .22s ease, opacity .18s ease, padding .22s ease;
+    }
+
+    header.collapsed .header-panel {
+      max-height: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    header .hint {
+      margin: 0 0 12px;
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+
+    header code {
+      background: #f3f4f6;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+
+    .stats {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      font-size: 13px;
+      margin-bottom: 12px;
+      align-items: center;
+    }
+
+    .stats .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: var(--blocked-bg);
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stats .pill.done {
+      background: var(--done-bg);
+      color: var(--done);
+    }
+
+    .stats .pill.ip {
+      background: var(--ip-bg);
+      color: var(--ip);
+    }
+
+    .stats .pill.ready {
+      background: var(--ready-bg);
+      color: var(--ready);
+    }
+
+    .stats .progress {
+      flex: 1;
+      min-width: 200px;
+      max-width: 360px;
+      height: 8px;
+      position: relative;
+      background: linear-gradient(90deg, var(--progress-start), var(--progress-mid), var(--progress-end));
+      border-radius: 4px;
+      overflow: hidden;
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .04);
+    }
+
+    .stats .progress::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      left: var(--pct, 0%);
+      background: #e5e7eb;
+      transition: left .3s;
+    }
+
+    .stats .progress>span {
+      display: none;
+    }
+
+    .filters {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .filters button {
+      border: 1px solid var(--border);
+      background: #fff;
+      padding: 5px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12.5px;
+      color: var(--fg);
+    }
+
+    .filters button:hover {
+      border-color: var(--accent);
+    }
+
+    .filters button.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    main {
+      padding: 20px 24px 60px;
+      overflow-x: auto;
+    }
+
+    .phase-grid {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: 280px;
+      gap: 16px;
+      align-items: start;
+      min-width: max-content;
+    }
+
+    .phase {
+      background: transparent;
+    }
+
+    .phase-head {
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      padding-bottom: 8px;
+      margin-bottom: 8px;
+      border-bottom: 1px dashed var(--phase-border, var(--border));
+    }
+
+    .phase-head::before {
+      content: '';
+      display: block;
+      width: 100%;
+      height: 4px;
+      margin-bottom: 8px;
+      border-radius: 999px;
+      background: var(--phase-color, var(--accent));
+      box-shadow: 0 0 0 3px var(--phase-soft, transparent);
+    }
+
+    .phase-head h2 {
+      margin: 0;
+      font-size: 12px;
+      color: var(--phase-color, var(--muted));
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+
+    .phase-head .phase-title {
+      font-size: 14px;
+      color: var(--fg);
+      margin-top: 2px;
+      font-weight: 600;
+    }
+
+    .phase-head .phase-progress {
+      margin-top: 6px;
+      font-size: 11.5px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .task {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--blocked);
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      cursor: default;
+      transition: transform .15s, box-shadow .15s, opacity .2s;
+    }
+
+    .task:hover {
+      box-shadow: 0 4px 12px rgba(0, 0, 0, .06);
+      transform: translateY(-1px);
+    }
+
+    .task h3 {
+      margin: 0 0 4px;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+
+    .task .desc {
+      margin: 0 0 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .task .meta {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 1px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      background: var(--blocked-bg);
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .badge.status::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .deps {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+
+    .deps-label {
+      font-size: 11px;
+      color: var(--muted);
+      margin-right: 2px;
+      align-self: center;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 1px 7px;
+      border-radius: 3px;
+      background: #f3f4f6;
+      color: #4b5563;
+      font-size: 11px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .chip:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .chip.dep-done {
+      background: var(--done-bg);
+      color: var(--done);
+    }
+
+    .chip.dep-pending {
+      background: var(--ip-bg);
+      color: var(--ip);
+    }
+
+    /* Status visualization */
+    .task[data-status="done"] {
+      border-left-color: var(--done);
+      background: var(--done-bg);
+      opacity: .75;
+    }
+
+    .task[data-status="done"] h3 {
+      text-decoration: line-through;
+    }
+
+    .task[data-status="done"] .badge.status {
+      background: #d1fae5;
+      color: var(--done);
+    }
+
+    .task[data-status="done"] .badge.status::after {
+      content: '已完成';
+    }
+
+    .task[data-status="in-progress"] {
+      border-left-color: var(--ip);
+      background: var(--ip-bg);
+    }
+
+    .task[data-status="in-progress"] .badge.status {
+      background: #fef3c7;
+      color: var(--ip);
+    }
+
+    .task[data-status="in-progress"] .badge.status::after {
+      content: '进行中';
+    }
+
+    .task.is-ready {
+      border-left-color: var(--ready);
+      background: var(--ready-bg);
+    }
+
+    .task.is-ready .badge.status {
+      background: #dbeafe;
+      color: var(--ready);
+    }
+
+    .task.is-ready .badge.status::after {
+      content: '可开工';
+    }
+
+    .task.is-blocked {
+      border-left-color: var(--blocked);
+      background: var(--blocked-bg);
+    }
+
+    .task.is-blocked .badge.status {
+      background: var(--blocked-badge-bg);
+      color: var(--blocked);
+    }
+
+    .task.is-blocked .badge.status::after {
+      content: '被阻塞';
+    }
+
+    /* Highlight states */
+    .task.hl-dep {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .task.hl-dependent {
+      outline: 2px dashed var(--accent);
+      outline-offset: 2px;
+    }
+
+    .task.flash {
+      animation: flash 1.5s ease;
+    }
+
+    @keyframes flash {
+
+      0%,
+      100% {
+        box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+      }
+
+      30% {
+        box-shadow: 0 0 0 6px rgba(99, 102, 241, .4);
+      }
+    }
+
+    /* Filter hide */
+    .task.hidden {
+      display: none;
+    }
+
+    /* Empty phase indicator */
+    .phase-empty {
+      color: var(--muted);
+      font-size: 11.5px;
+      padding: 12px 0;
+      text-align: center;
+      font-style: italic;
+    }
+
+    details.legend {
+      margin: 0 0 12px;
+      font-size: 12px;
+    }
+
+    details.legend summary {
+      cursor: pointer;
+      color: var(--muted);
+      user-select: none;
+    }
+
+    details.legend ul {
+      margin: 8px 0 0;
+      padding-left: 20px;
+      color: var(--muted);
+    }
+
+    details.legend li {
+      margin: 2px 0;
+    }
+
+    /* === 连接条 / 保存反馈 === */
+    .conn-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 8px 12px;
+      margin: 0 0 12px;
+      background: #f9fafb;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 12.5px;
+    }
+
+    .conn-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--blocked);
+      flex-shrink: 0;
+    }
+
+    .conn-bar.is-connected .conn-dot {
+      background: var(--done);
+      box-shadow: 0 0 0 3px rgba(16, 185, 129, .15);
+    }
+
+    .conn-bar.is-pending .conn-dot {
+      background: var(--ip);
+    }
+
+    .conn-bar .conn-label {
+      color: var(--fg);
+      font-weight: 500;
+    }
+
+    .conn-bar .conn-file {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+
+    .conn-bar .conn-saved {
+      color: var(--muted);
+      font-size: 11.5px;
+      margin-left: auto;
+      font-variant-numeric: tabular-nums;
+      opacity: 0;
+      transition: opacity .3s;
+    }
+
+    .conn-bar .conn-saved.show {
+      opacity: 1;
+    }
+
+    .conn-bar button {
+      border: 1px solid var(--border);
+      background: #fff;
+      padding: 4px 10px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--fg);
+    }
+
+    .conn-bar button:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .conn-bar button.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    .conn-bar button.primary:hover {
+      filter: brightness(.95);
+      color: #fff;
+    }
+
+    .conn-bar.fsa-unsupported {
+      background: #fff7ed;
+      border-color: #fed7aa;
+      color: #9a3412;
+    }
+
+    /* 编辑模式：状态徽章可点击循环 */
+    body.editable .task .badge.status {
+      cursor: pointer;
+      user-select: none;
+      transition: transform .1s;
+    }
+
+    body.editable .task .badge.status:hover {
+      transform: scale(1.05);
+    }
+
+    body.editable .task .badge.status:active {
+      transform: scale(.95);
+    }
+
+    body.board-draft.editable .task .badge.status {
+      cursor: default;
+    }
+
+    body.board-draft.editable .task .badge.status:hover,
+    body.board-draft.editable .task .badge.status:active {
+      transform: none;
+    }
+
+    body.editable .task {
+      cursor: pointer;
+    }
+
+    body.editable .task::after {
+      content: '双击编辑';
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      font-size: 10px;
+      color: var(--muted);
+      opacity: 0;
+      transition: opacity .15s;
+      pointer-events: none;
+    }
+
+    body.editable .task {
+      position: relative;
+    }
+
+    body.editable .task:hover::after {
+      opacity: .55;
+    }
+
+    .stats .pill.hours {
+      background: #eef2ff;
+      color: var(--accent);
+    }
+
+    .phase-progress .phase-pct,
+    .phase-progress .phase-hours {
+      color: var(--phase-color, var(--accent));
+      font-weight: 600;
+    }
+
+    .phase-progress .phase-hours {
+      margin-left: 6px;
+    }
+
+    /* === 任务细则浮窗 (hover) === */
+    .task-popover {
+      position: fixed;
+      width: 340px;
+      max-height: 60vh;
+      overflow: hidden;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 12px 36px rgba(15, 23, 42, .14);
+      padding: 14px 16px;
+      font-size: 12.5px;
+      z-index: 150;
+      pointer-events: none;
+      display: none;
+    }
+
+    .task-popover.show {
+      display: block;
+    }
+
+    .task-popover.pinned {
+      pointer-events: auto;
+      overflow: auto;
+    }
+
+    .task-popover .popover-close {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 24px;
+      height: 24px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--muted);
+      border-radius: 6px;
+      cursor: pointer;
+      line-height: 20px;
+      font-size: 16px;
+    }
+
+    .task-popover .popover-close:hover {
+      color: var(--blocked);
+      border-color: #fecaca;
+      background: #fff7f7;
+    }
+
+    .task-popover .popover-title {
+      font-size: 13.5px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: var(--fg);
+      line-height: 1.35;
+    }
+
+    .task-popover .popover-desc {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px dashed var(--border);
+    }
+
+    .task-popover .popover-empty {
+      color: var(--muted);
+      font-style: italic;
+      text-align: center;
+      padding: 16px 0;
+      font-size: 12px;
+    }
+
+    .task-popover .popover-section {
+      margin: 8px 0;
+      padding: 8px 10px;
+      background: #f9fafb;
+      border-left: 3px solid var(--accent);
+      border-radius: 4px;
+    }
+
+    .task-popover .popover-section h5 {
+      margin: 0 0 6px;
+      font-size: 12.5px;
+      color: var(--fg);
+      font-weight: 600;
+    }
+
+    .task-popover .popover-section ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--fg);
+    }
+
+    .task-popover .popover-section li {
+      margin: 2px 0;
+      line-height: 1.45;
+    }
+
+    /* === 点击焦点 / 依赖可视化 === */
+    .task.focus {
+      outline: 3px solid var(--focus);
+      outline-offset: 2px;
+      z-index: 4;
+      position: relative;
+    }
+
+    .task.focus-dep-done {
+      outline: 3px solid var(--done);
+      outline-offset: 2px;
+      z-index: 3;
+      position: relative;
+    }
+
+    .task.focus-dep-pending {
+      outline: 3px solid #ef4444;
+      outline-offset: 2px;
+      z-index: 3;
+      position: relative;
+    }
+
+    .task.focus-dependent {
+      outline: 3px dashed var(--accent);
+      outline-offset: 2px;
+      z-index: 3;
+      position: relative;
+    }
+
+    .task.focus::before,
+    .task.focus-dep-done::before,
+    .task.focus-dep-pending::before,
+    .task.focus-dependent::before {
+      content: attr(data-focus-tag);
+      position: absolute;
+      top: -10px;
+      left: 8px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-weight: 600;
+      letter-spacing: .04em;
+      z-index: 5;
+    }
+
+    .task.focus {
+      --focus-color: var(--focus);
+    }
+
+    .task.focus::before {
+      background: var(--focus);
+    }
+
+    .task.focus-dep-done::before {
+      background: var(--done);
+    }
+
+    .task.focus-dep-pending::before {
+      background: #ef4444;
+    }
+
+    .task.focus-dependent::before {
+      background: var(--accent);
+    }
+
+    /* === 编辑模态 === */
+    .modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, .42);
+      display: none;
+      z-index: 200;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 40px 20px 60px;
+      overflow-y: auto;
+      backdrop-filter: blur(2px);
+    }
+
+    .modal.show {
+      display: flex;
+    }
+
+    .modal-dialog {
+      background: #fff;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 680px;
+      padding: 22px 26px 18px;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, .22);
+      font-size: 13px;
+    }
+
+    .modal-dialog h2 {
+      margin: 0 0 4px;
+      font-size: 16px;
+    }
+
+    .modal-dialog .modal-sub {
+      color: var(--muted);
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      margin-bottom: 4px;
+    }
+
+    .modal-dialog .edit-hint {
+      color: var(--muted);
+      font-size: 11.5px;
+      margin: 0 0 16px;
+      padding: 6px 10px;
+      background: #fffbeb;
+      border-left: 3px solid var(--ip);
+      border-radius: 4px;
+      line-height: 1.5;
+    }
+
+    .modal-dialog .form-row {
+      margin-bottom: 14px;
+    }
+
+    .modal-dialog .form-row-inline {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .modal-dialog .form-row-inline .form-col {
+      flex: 1;
+    }
+
+    .modal-dialog label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+
+    .modal-dialog input[type="text"],
+    .modal-dialog input[type="number"],
+    .modal-dialog select,
+    .modal-dialog textarea {
+      width: 100%;
+      padding: 7px 10px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      font: inherit;
+      font-size: 13px;
+      color: var(--fg);
+      background: #fff;
+      box-sizing: border-box;
+    }
+
+    .modal-dialog input:focus,
+    .modal-dialog select:focus,
+    .modal-dialog textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, .15);
+    }
+
+    .modal-dialog textarea {
+      min-height: 56px;
+      resize: vertical;
+      font-family: inherit;
+      line-height: 1.5;
+    }
+
+    .edit-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 2px 4px 2px 8px;
+      background: #eef2ff;
+      color: var(--accent);
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11.5px;
+      margin: 0 4px 4px 0;
+    }
+
+    .edit-chip button {
+      background: transparent;
+      border: none;
+      color: var(--accent);
+      cursor: pointer;
+      padding: 0 4px;
+      font-size: 14px;
+      line-height: 1;
+    }
+
+    .edit-chip button:hover {
+      color: #ef4444;
+    }
+
+    #edit-deps-chips {
+      min-height: 28px;
+      padding: 4px 0 0;
+      margin-bottom: 6px;
+    }
+
+    #edit-deps-suggestions {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      margin-top: 6px;
+      background: #fafafa;
+    }
+
+    #edit-deps-suggestions:empty {
+      display: none;
+    }
+
+    .sugg-item {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 6px 10px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+
+    .sugg-item:last-child {
+      border-bottom: none;
+    }
+
+    .sugg-item:hover {
+      background: #eef2ff;
+    }
+
+    .sugg-item code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--accent);
+      background: #fff;
+      padding: 1px 6px;
+      border-radius: 3px;
+      flex-shrink: 0;
+      font-size: 11px;
+    }
+
+    .sugg-item span.sugg-title {
+      flex: 1;
+      color: var(--fg);
+    }
+
+    .sugg-item em {
+      font-style: normal;
+      color: var(--muted);
+      font-size: 10.5px;
+      background: #f3f4f6;
+      padding: 1px 6px;
+      border-radius: 3px;
+    }
+
+    #edit-details {
+      margin-bottom: 8px;
+    }
+
+    .edit-details-empty {
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+      padding: 12px;
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      margin-bottom: 8px;
+    }
+
+    .edit-section {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      background: #fafafa;
+    }
+
+    .edit-section-head {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .edit-section-head input {
+      flex: 1;
+    }
+
+    .edit-section-head .remove-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: #ef4444;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 11.5px;
+      white-space: nowrap;
+    }
+
+    .edit-section-head .remove-btn:hover {
+      background: #fef2f2;
+      border-color: #ef4444;
+    }
+
+    .edit-items {
+      padding-left: 0;
+    }
+
+    .edit-item-row {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 4px;
+      align-items: center;
+    }
+
+    .edit-item-row input {
+      flex: 1;
+    }
+
+    .edit-item-row button {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .edit-item-row button:hover {
+      color: #ef4444;
+      border-color: #ef4444;
+    }
+
+    .add-item-btn,
+    .add-section-btn {
+      background: transparent;
+      border: 1px dashed var(--border);
+      color: var(--accent);
+      padding: 5px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      display: block;
+      width: 100%;
+      margin-top: 4px;
+    }
+
+    .add-section-btn {
+      margin-top: 6px;
+      padding: 7px;
+    }
+
+    .add-item-btn:hover,
+    .add-section-btn:hover {
+      background: #eef2ff;
+      border-style: solid;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+
+    .modal-actions .left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .modal-actions .right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .modal-actions button {
+      padding: 7px 16px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 13px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--fg);
+    }
+
+    .modal-actions button.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    .modal-actions button.primary:hover {
+      filter: brightness(.95);
+    }
+
+    .modal-actions button:not(.primary):hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .modal-actions button.danger {
+      color: #ef4444;
+      border-color: #fecaca;
+      background: #fff;
+    }
+
+    .modal-actions button.danger:hover {
+      color: #ef4444;
+      border-color: #ef4444;
+      background: #fef2f2;
+    }
+
+    .modal-actions button:disabled,
+    .modal-actions button:disabled:hover {
+      cursor: not-allowed;
+      opacity: .45;
+      color: var(--muted);
+      border-color: var(--border);
+      background: #f9fafb;
+    }
+
+    .modal-dialog select:disabled {
+      cursor: not-allowed;
+      color: var(--muted);
+      background: #f3f4f6;
+    }
+
+    .modal-actions .cascade-warn {
+      color: var(--ip);
+      font-size: 11.5px;
+    }
+
+    /* === 整体编排 草稿 / 正式 (board-level) === */
+    .board-stage-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 0 0 10px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fdfdfd;
+      font-size: 12.5px;
+    }
+
+    .board-stage-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-weight: 600;
+      letter-spacing: .03em;
+      font-size: 12px;
+    }
+
+    .board-stage-chip::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .board-stage-chip.draft {
+      background: #f3f4f6;
+      color: #6b7280;
+      border: 1px dashed #d1d5db;
+    }
+
+    .board-stage-chip.formal {
+      background: #ecfdf5;
+      color: var(--done);
+      border: 1px solid #a7f3d0;
+    }
+
+    .board-model-note {
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+      font-weight: 500;
+    }
+
+    .badge.evidence {
+      background: #eef2ff;
+      color: var(--accent);
+      padding: 1px 8px;
+    }
+
+    /* === Header 标题可编辑 === */
+    body.editable #board-title {
+      cursor: pointer;
+      border-bottom: 1px dashed transparent;
+    }
+
+    body.editable #board-title:hover {
+      border-bottom-color: var(--accent);
+      color: var(--accent);
+    }
+
+    @media (max-width: 900px) {
+      .header-summary {
+        align-items: flex-start;
+        padding: 10px 14px;
+      }
+
+      .header-title-block {
+        flex-basis: 100%;
+      }
+
+      .header-actions {
+        width: 100%;
+        margin-left: 0;
+      }
+
+      .header-actions button {
+        flex: 1 1 auto;
+      }
+
+      .header-panel {
+        padding-right: 14px;
+        padding-left: 14px;
+      }
+
+    }
+  </style>
+</head>
+
+<body>
+  <header class="board-header" id="board-header">
+    <div class="header-summary">
+      <div class="header-title-block">
+        <h1 id="board-title" title="编辑模式下点击可修改">规格驱动任务规划面板</h1>
+        <div class="header-compact">
+          <span id="header-progress-summary">等待连接 spec-tasks.json</span>
+          <span id="header-stage-summary" class="header-stage-summary draft">草稿</span>
+          <span id="header-file-summary">未连接</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="export-png" title="将整个看板（含横向 / 纵向滚动出可视区外的部分）导出为 PNG 图片">整体截图 PNG</button>
+        <button id="header-toggle" class="header-toggle" type="button" aria-expanded="true" aria-controls="header-panel" title="收起顶部面板">
+          <span id="header-toggle-label">收起</span>
+          <span id="header-toggle-icon" class="header-toggle-icon" aria-hidden="true">⌃</span>
+        </button>
+      </div>
+    </div>
+    <div class="header-panel" id="header-panel">
+      <p class="hint">
+        数据读取同目录 JSON。任务详情必须从产品规格 / API 文档 / 现有代码事实出发，写清事实、推理、验证、证据缺口和验收边界；完成后补齐交付物与任务总结。
+        <strong>悬停</strong>临时查看任务细则；<strong>单击</strong>固定任务详情并可视化依赖（<span style="color:#3b82f6">蓝=焦点</span> · <span
+          style="color:#10b981">绿=前置已完成</span> · <span style="color:#ef4444">红=前置未完成</span> · <span
+          style="color:#6366f1">虚线=后续任务</span>）。
+        Safari / Firefox 不支持 File System Access API，自动降级为只读（CSV 导出仍可用）。
+      </p>
+      <div class="conn-bar" id="conn-bar">
+        <span class="conn-dot"></span>
+        <span class="conn-label" id="conn-label">未连接</span>
+        <span class="conn-file" id="conn-file"></span>
+        <button id="conn-action" class="primary">连接 spec-tasks.json</button>
+        <button id="conn-disconnect" hidden>断开</button>
+        <button id="export-csv" title="导出当前任务为 CSV（详情按 Section 拍平：组标题独立行，分点换行 + 2 空格缩进）">导出 CSV</button>
+        <span class="conn-saved" id="conn-saved"></span>
+      </div>
+      <div class="board-stage-row" id="board-stage-row">
+        <span>规划模型：</span>
+        <span class="board-stage-chip formal" id="board-stage-chip">规格驱动</span>
+        <span class="board-model-note" id="board-model-note">任务详情需包含 7 个固定 Section；完成任务必须补齐交付物 / 任务总结内容</span>
+      </div>
+      <div class="stats" id="stats"></div>
+      <div class="filters">
+        <button data-filter="all" class="active">全部</button>
+        <button data-filter="ready">可开工</button>
+        <button data-filter="in-progress">进行中</button>
+        <button data-filter="blocked">被阻塞</button>
+        <button data-filter="done">已完成</button>
+        <button data-filter="not-done">未完成</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="phase-grid">
+      <!-- phase + task DOM is rendered by JS from JSON -->
+    </div>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"
+    integrity="sha512-BNaRQnYJYiPSqHHDb58B0yaPfCu+Wgds8Gp/gU33kqBtgNS4tSPHuGibyoeqMV/TJlSKda6FXzoEyYGjTe+vXA=="
+    referrerpolicy="no-referrer"></script>
+
+  <div class="task-popover" id="task-popover" aria-hidden="true"></div>
+
+  <div class="modal" id="edit-modal" role="dialog" aria-modal="true" aria-labelledby="edit-modal-title">
+    <div class="modal-dialog">
+      <h2 id="edit-modal-title">编辑任务</h2>
+      <div class="modal-sub" id="edit-id"></div>
+      <p class="edit-hint">
+        改动会触发<strong>依赖级联校验</strong>：若状态设为 <code>done</code> 但前置未全部完成，会自动降为 <code>planned</code>，并继续向后传递。<br>
+        添加依赖时会拦截循环引用。任务详情建议保留产品规格、API 文档或现有代码路径等事实来源，并把验证写成可执行断言。
+      </p>
+
+      <div class="form-row">
+        <label for="edit-title">标题</label>
+        <input type="text" id="edit-title" autocomplete="off">
+      </div>
+
+      <div class="form-row-inline">
+        <div class="form-col">
+          <label for="edit-status">状态</label>
+          <select id="edit-status">
+            <option value="planned">Planned（计划中 / 被阻塞 / 可开工）</option>
+            <option value="in-progress">In Progress（进行中）</option>
+            <option value="done">Done（已完成）</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label for="edit-desc">描述（卡片正文）</label>
+        <textarea id="edit-desc" rows="3"></textarea>
+      </div>
+
+      <div class="form-row">
+        <label>依赖（前置任务）</label>
+        <div id="edit-deps-chips"></div>
+        <input type="text" id="edit-deps-search" placeholder="按 ID 或标题搜索 / 浏览全部任务…" autocomplete="off">
+        <div id="edit-deps-suggestions"></div>
+      </div>
+
+      <div class="form-row">
+        <label>任务细则（按 Section 分组，每组：标题 + 分点）</label>
+        <div id="edit-details"></div>
+      </div>
+
+      <div class="modal-actions">
+        <div class="left">
+          <button type="button" id="edit-delete" class="danger">删除任务</button>
+          <span class="cascade-warn" id="edit-cascade-warn"></span>
+        </div>
+        <div class="right">
+          <button type="button" id="edit-cancel">取消</button>
+          <button type="button" id="edit-save" class="primary">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      // ===== Constants =====
+      const STATUS_ORDER = ['planned', 'in-progress', 'done'];
+      const DB_NAME = 'pethealth-devboard';
+      const STORE = 'handles';
+      const HANDLE_KEY = 'tasksJsonHandle';
+      const HEADER_COLLAPSED_KEY = 'devBoardHeaderCollapsed';
+      const JSON_VERSION = 2;
+      const REQUIRED_DETAIL_SECTIONS = ['事实', '基于事实的演绎推理', '验证', '证据缺口', '验收边界', '交付物', '任务总结'];
+      const DONE_REQUIRED_ITEM_SECTIONS = ['交付物', '任务总结'];
+
+      // ===== Mutable state =====
+      let tasks = [];
+      let taskMap = Object.create(null);
+      let focused = null;
+      let popoverTarget = null;
+      let popoverPinned = false;
+      let editDepsCurrent = [];
+      let editDetailsCurrent = [];
+      let editTargetId = null;
+      let boardTitle = '';
+      let lastLoadedData = null;
+      let lastLoadedText = '';
+      const DEFAULT_BOARD_TITLE = '规格驱动任务规划面板';
+
+      // ===== Helpers =====
+      const $ = id => document.getElementById(id);
+      function savedHeaderCollapsed() {
+        try { return localStorage.getItem(HEADER_COLLAPSED_KEY) === '1'; }
+        catch (e) { return false; }
+      }
+      function applyHeaderCollapsed(collapsed) {
+        const header = $('board-header');
+        const panel = $('header-panel');
+        const toggle = $('header-toggle');
+        const label = $('header-toggle-label');
+        const icon = $('header-toggle-icon');
+        if (!header || !panel || !toggle) return;
+        header.classList.toggle('collapsed', collapsed);
+        panel.setAttribute('aria-hidden', String(collapsed));
+        if ('inert' in panel) panel.inert = collapsed;
+        toggle.setAttribute('aria-expanded', String(!collapsed));
+        toggle.title = collapsed ? '展开顶部面板' : '收起顶部面板';
+        if (label) label.textContent = collapsed ? '展开' : '收起';
+        if (icon) icon.textContent = collapsed ? '⌄' : '⌃';
+        try { localStorage.setItem(HEADER_COLLAPSED_KEY, collapsed ? '1' : '0'); }
+        catch (e) { }
+      }
+      function initHeaderCollapse() {
+        const toggle = $('header-toggle');
+        applyHeaderCollapsed(savedHeaderCollapsed());
+        if (toggle) toggle.addEventListener('click', () => applyHeaderCollapsed(!$('board-header').classList.contains('collapsed')));
+      }
+      function updateHeaderStageSummary() {
+        const el = $('header-stage-summary');
+        if (!el) return;
+        el.className = 'header-stage-summary formal';
+        el.textContent = '规格驱动';
+      }
+      function updateHeaderConnectionSummary(label, file) {
+        const el = $('header-file-summary');
+        if (!el) return;
+        el.textContent = file ? `${label} · ${file}` : label;
+      }
+      function updateHeaderProgressSummary(counts, pct) {
+        const el = $('header-progress-summary');
+        if (!el) return;
+        if (!counts.total) {
+          el.textContent = '等待连接 spec-tasks.json';
+          return;
+        }
+        el.textContent = `完成 ${counts.done}/${counts.total} · ${pct}% · 可开工 ${counts.ready}`;
+      }
+      function escapeHtml(s) {
+        return (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'
+        }[c]));
+      }
+      function detailSectionTitles(t) {
+        return (t?._details || []).map(sec => String(sec.title || '').trim()).filter(Boolean);
+      }
+      function missingRequiredSections(t) {
+        const titles = new Set(detailSectionTitles(t));
+        return REQUIRED_DETAIL_SECTIONS.filter(title => !titles.has(title));
+      }
+      function detailItemsByTitle(t, title) {
+        const sec = (t?._details || []).find(item => String(item.title || '').trim() === title);
+        return (sec?.items || []).map(item => String(item || '').trim()).filter(Boolean);
+      }
+      function missingDoneItemSections(t) {
+        if (t?.dataset?.status !== 'done') return [];
+        return DONE_REQUIRED_ITEM_SECTIONS.filter(title => !detailItemsByTitle(t, title).length);
+      }
+      function verificationItems(t) {
+        return detailItemsByTitle(t, '验证');
+      }
+      function isDone(id) {
+        const t = taskMap[id];
+        return !!t && t.dataset.status === 'done';
+      }
+      function pad2(n) { return String(n).padStart(2, '0'); }
+      function todayDateStr() {
+        const d = new Date();
+        return `${d.getFullYear()}.${pad2(d.getMonth() + 1)}.${pad2(d.getDate())}`;
+      }
+      function nowDateTimeStr() {
+        const d = new Date();
+        return `${d.getFullYear()}.${pad2(d.getMonth() + 1)}.${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+      }
+      function dateOnlyStr(d) {
+        return `${d.getFullYear()}.${pad2(d.getMonth() + 1)}.${pad2(d.getDate())}`;
+      }
+      function taskTitle(t) {
+        return t ? (t.querySelector('h3')?.textContent || t.id) : '';
+      }
+      function taskPhaseLabel(t) {
+        const phase = t?.closest('.phase')?.dataset.phase;
+        return phase ? `Phase ${phase}` : '未分组';
+      }
+      function taskRef(t) {
+        return t ? `${taskPhaseLabel(t)} · ${taskTitle(t)}` : '该任务';
+      }
+      function formatTaskList(list, limit = 6) {
+        const arr = (list || []).filter(Boolean);
+        const shown = arr.slice(0, limit).map(taskRef).join('、');
+        return arr.length > limit ? `${shown} 等 ${arr.length} 个任务` : shown;
+      }
+      function formatTaskBulletLines(list, limit = 8, prefix = '  • ') {
+        const arr = (list || []).filter(Boolean);
+        const lines = arr.slice(0, limit).map(item => `${prefix}${taskRef(item)}`);
+        if (arr.length > limit) lines.push(`${prefix}以及另外 ${arr.length - limit} 个任务`);
+        return lines;
+      }
+      function bulletLines(items, prefix = '• ') {
+        return (items || []).filter(Boolean).map(item => `${prefix}${item}`);
+      }
+      function isDoneAfter(id, overrides) {
+        if (overrides && Object.prototype.hasOwnProperty.call(overrides, id)) {
+          return overrides[id] === 'done';
+        }
+        return isDone(id);
+      }
+      function isReadyAfter(t, overrides, depsOverride) {
+        const deps = depsOverride || t._deps || [];
+        return deps.every(d => isDoneAfter(d, overrides));
+      }
+      function derivedState(t) {
+        const s = t.dataset.status;
+        if (s === 'done' || s === 'in-progress') return s;
+        return t._deps.every(isDone) ? 'ready' : 'blocked';
+      }
+      function stateLabel(state) {
+        return ({
+          done: '已完成',
+          'in-progress': '进行中',
+          ready: '可开工',
+          blocked: '被阻塞',
+          planned: '未完成',
+        })[state] || state;
+      }
+      function nextStatusLabel(t, nextStatus, depsOverride) {
+        if (nextStatus === 'done' || nextStatus === 'in-progress') return stateLabel(nextStatus);
+        return isReadyAfter(t, null, depsOverride) ? '可开工' : '被阻塞';
+      }
+      function getCascadeDowngradeImpact(t, nextStatus) {
+        const status = Object.create(null);
+        tasks.forEach(item => { status[item.id] = item.dataset.status; });
+        status[t.id] = nextStatus;
+        let changed = true;
+        let safety = 500;
+        while (changed && safety-- > 0) {
+          changed = false;
+          tasks.forEach(item => {
+            if (status[item.id] === 'done') {
+              const depsDone = (item._deps || []).every(d => status[d] === 'done');
+              if (!depsDone) {
+                status[item.id] = 'planned';
+                changed = true;
+              }
+            }
+          });
+        }
+        return tasks.filter(item => item !== t && item.dataset.status === 'done' && status[item.id] !== 'done');
+      }
+      function getTasksBecomingReadyAfterDone(t) {
+        const overrides = { [t.id]: 'done' };
+        return tasks.filter(item => {
+          if (item === t || item.dataset.status !== 'planned') return false;
+          const isBlockedNow = !(item._deps || []).every(isDone);
+          const readyAfter = isReadyAfter(item, overrides);
+          return isBlockedNow && readyAfter;
+        });
+      }
+      function buildStatusChangeMessage(t, nextStatus) {
+        const curStatus = t.dataset.status;
+        const curLabel = stateLabel(derivedState(t));
+        const nextLabel = nextStatusLabel(t, nextStatus);
+        const name = taskRef(t);
+
+        if (curStatus === 'done' && nextStatus !== 'done') {
+          const affected = getCascadeDowngradeImpact(t, nextStatus);
+          const lines = [
+            '确认变更任务状态吗？',
+            ...bulletLines([
+              `任务：${name}`,
+              '当前状态：已完成',
+              `目标状态：${nextLabel}`,
+              '影响：该任务将重新被标记为未完成',
+            ]),
+          ];
+          if (affected.length) {
+            lines.push('• 以下任务会被依赖级联重新标记为未完成：');
+            lines.push(...formatTaskBulletLines(affected));
+          }
+          lines.push('• 依赖这个任务的后续任务会被重新检查；只要前置任务还没全部完成，就会自动变为「被阻塞」');
+          return lines.join('\n');
+        }
+
+        if (curStatus === 'in-progress' && nextStatus === 'done') {
+          const readyAfter = getTasksBecomingReadyAfterDone(t);
+          const lines = [
+            '确认变更任务状态吗？',
+            ...bulletLines([
+              `任务：${name}`,
+              '当前状态：进行中',
+              '目标状态：已完成',
+            ]),
+          ];
+          if (readyAfter.length) {
+            lines.push('• 以下任务会在你完成后自动变为「可开工」：');
+            lines.push(...formatTaskBulletLines(readyAfter));
+          } else {
+            lines.push('• 后续任务会重新计算；满足全部前置依赖的任务会自动变为「可开工」');
+          }
+          return lines.join('\n');
+        }
+
+        return [
+          '确认变更任务状态吗？',
+          ...bulletLines([
+            `任务：${name}`,
+            `当前状态：${curLabel}`,
+            `目标状态：${nextLabel}`,
+          ]),
+        ].join('\n');
+      }
+      function requestStatusChange(t, nextStatus) {
+        if (!t || t.dataset.status === nextStatus) return true;
+        if (t.classList.contains('is-blocked')) {
+          alert(`${taskRef(t)} 当前是「被阻塞」状态，不能手动转化。\n请先完成它的前置任务；前置全部完成后，它会自动变为「可开工」。`);
+          return false;
+        }
+        if (nextStatus === 'done' && !(t._deps || []).every(isDone)) {
+          alert(`${taskRef(t)} 的前置依赖尚未全部完成，不能手动设为「已完成」。\n请先完成前置任务，或在编辑面板中调整依赖。`);
+          return false;
+        }
+        return window.confirm(buildStatusChangeMessage(t, nextStatus));
+      }
+
+      // ===== Red → Green gradient helpers =====
+      function clamp01(n) {
+        return Math.max(0, Math.min(1, Number(n) || 0));
+      }
+      function redGreenColorAt(ratio, alpha) {
+        const r = clamp01(ratio);
+        // HSL hue interpolation lets the middle naturally pass through orange / yellow.
+        const hue = Math.round(0 + 145 * r);
+        const a = alpha == null ? 1 : clamp01(alpha);
+        return `hsla(${hue}, 74%, 45%, ${a})`;
+      }
+      function applyPhaseGradient() {
+        const phaseEls = Array.from(document.querySelectorAll('.phase'));
+        const total = phaseEls.length;
+        phaseEls.forEach((phase, index) => {
+          const ratio = total <= 1 ? 1 : index / (total - 1);
+          phase.style.setProperty('--phase-color', redGreenColorAt(ratio));
+          phase.style.setProperty('--phase-soft', redGreenColorAt(ratio, .12));
+          phase.style.setProperty('--phase-border', redGreenColorAt(ratio, .28));
+        });
+      }
+
+      function canEditTasks() {
+        return document.body.classList.contains('editable');
+      }
+      function hasWriteAccess() {
+        return document.body.classList.contains('editable');
+      }
+
+      // ===== Render board from JSON =====
+      function applyBoardTitle() {
+        const el = $('board-title');
+        const t = (boardTitle && String(boardTitle).trim()) || DEFAULT_BOARD_TITLE;
+        if (el) el.textContent = t;
+        document.title = t;
+      }
+      function applyBoardStage() {
+        updateHeaderStageSummary();
+        const chip = $('board-stage-chip');
+        const modelNote = $('board-model-note');
+        if (chip) {
+          chip.className = 'board-stage-chip formal';
+          chip.textContent = '规格驱动';
+        }
+        if (modelNote) modelNote.textContent = '任务详情需包含 7 个固定 Section；完成任务必须补齐交付物 / 任务总结内容';
+        document.body.classList.remove('board-draft');
+        document.body.classList.add('board-formal');
+      }
+      function renderBoard(data) {
+        const grid = document.querySelector('.phase-grid');
+        grid.innerHTML = '';
+        tasks = [];
+        taskMap = Object.create(null);
+        focused = null;
+        hidePopover(true);
+
+        boardTitle = (data.title && String(data.title).trim()) || '';
+        applyBoardTitle();
+        applyBoardStage();
+
+        (data.phases || []).forEach(phase => {
+          const sec = document.createElement('section');
+          sec.className = 'phase';
+          sec.dataset.phase = phase.num;
+          const head = document.createElement('div');
+          head.className = 'phase-head';
+          const h2 = document.createElement('h2'); h2.textContent = `Phase ${phase.num}`;
+          const pt = document.createElement('div'); pt.className = 'phase-title'; pt.textContent = phase.title || '';
+          const pp = document.createElement('div'); pp.className = 'phase-progress'; pp.setAttribute('data-progress', '');
+          head.appendChild(h2); head.appendChild(pt); head.appendChild(pp);
+          sec.appendChild(head);
+
+          (phase.tasks || []).forEach(task => {
+            const t = document.createElement('div');
+            t.className = 'task';
+            t.id = task.id;
+            t.dataset.status = task.status || 'planned';
+            t.dataset.deps = (task.deps || []).join(' ');
+            t._completedAt = task.completedAt || '';
+            const h3 = document.createElement('h3'); h3.textContent = task.title || task.id;
+            const p = document.createElement('p'); p.className = 'desc'; p.textContent = task.desc || '';
+            const meta = document.createElement('div'); meta.className = 'meta';
+            const eb = document.createElement('span'); eb.className = 'badge evidence';
+            const sb = document.createElement('span'); sb.className = 'badge status';
+            meta.appendChild(eb); meta.appendChild(sb);
+            t.appendChild(h3); t.appendChild(p); t.appendChild(meta);
+            t._deps = (task.deps || []).slice();
+            t._dependents = [];
+            t._details = Array.isArray(task.details) ? task.details : [];
+            attachTaskListeners(t);
+            sec.appendChild(t);
+            tasks.push(t);
+            if (taskMap[t.id]) console.warn('Duplicate id:', t.id);
+            taskMap[t.id] = t;
+          });
+          grid.appendChild(sec);
+        });
+
+        applyPhaseGradient();
+
+        // Reverse index for dependents
+        tasks.forEach(t => {
+          t._deps.forEach(d => {
+            const dep = taskMap[d];
+            if (!dep) console.warn(`Task ${t.id} → unknown dep ${d}`);
+            else dep._dependents.push(t.id);
+          });
+        });
+
+        tasks.forEach(renderTaskStatic);
+        refreshDerived();
+      }
+
+      function attachTaskListeners(t) {
+        t.addEventListener('mouseenter', () => {
+          if ($('edit-modal').classList.contains('show')) return;
+          showPopover(t);
+        });
+        t.addEventListener('mouseleave', () => hidePopover());
+        t.addEventListener('dblclick', async e => {
+          e.preventDefault();
+          if (window.getSelection) window.getSelection().removeAllRanges();
+          if (!document.body.classList.contains('editable')) {
+            alert('当前为只读模式，请先连接 JSON 启用编辑');
+            return;
+          }
+          const taskId = t.id;
+          if (!await reloadFromDiskBeforeChange()) return;
+          if (!canEditTasks()) {
+            alert('当前为只读模式，请先连接 JSON 启用编辑。');
+            return;
+          }
+          const freshTask = taskMap[taskId];
+          if (!freshTask) {
+            alert(`任务 ${taskId} 已不存在，请检查 JSON。`);
+            return;
+          }
+          openEditModal(freshTask);
+        });
+      }
+
+      // ===== Static render: badge + dep chips =====
+      function renderTaskStatic(t) {
+        const eb = t.querySelector('.badge.evidence');
+        if (eb) {
+          const missing = missingRequiredSections(t);
+          const doneMissing = missingDoneItemSections(t);
+          const checks = verificationItems(t).length;
+          if (missing.length) {
+            eb.textContent = `缺少 ${missing.length} 项`;
+            eb.title = `缺少必需 Section：${missing.join('、')}`;
+          } else if (doneMissing.length) {
+            eb.textContent = `完成缺 ${doneMissing.length} 项`;
+            eb.title = `已完成任务必须补齐内容：${doneMissing.join('、')}`;
+          } else {
+            eb.textContent = `证据完整 · 验证 ${checks}`;
+            eb.title = `已包含 7 个固定 Section；验证断言 ${checks} 条`;
+          }
+        }
+        let depsWrap = t.querySelector('.deps');
+        if (depsWrap) depsWrap.remove();
+        if (t._deps.length) {
+          depsWrap = document.createElement('div');
+          depsWrap.className = 'deps';
+          const label = document.createElement('span');
+          label.className = 'deps-label';
+          label.textContent = '依赖:';
+          depsWrap.appendChild(label);
+          t._deps.forEach(d => {
+            const chip = document.createElement('span');
+            chip.className = 'chip';
+            chip.dataset.target = d;
+            const dep = taskMap[d];
+            chip.textContent = d.replace(/^t\d+-/, '');
+            chip.title = dep ? dep.querySelector('h3').textContent : d;
+            depsWrap.appendChild(chip);
+          });
+          t.appendChild(depsWrap);
+        }
+        t.dataset.focusTag = '';
+      }
+
+      // ===== Cascade: done requires all deps done =====
+      function cascadeValidate() {
+        let changed = true, safety = 200;
+        while (changed && safety-- > 0) {
+          changed = false;
+          tasks.forEach(t => {
+            if (t.dataset.status === 'done' && !t._deps.every(isDone)) {
+              t.dataset.status = 'planned';
+              t._completedAt = '';
+              changed = true;
+            }
+          });
+        }
+      }
+
+      // ===== Derived state + counts =====
+      function refreshDerived() {
+        cascadeValidate();
+
+        const counts = { done: 0, ip: 0, ready: 0, blocked: 0, evidence: 0, total: tasks.length };
+
+        tasks.forEach(t => {
+          t.classList.remove('is-ready', 'is-blocked');
+          if (!missingRequiredSections(t).length && !missingDoneItemSections(t).length) counts.evidence++;
+          const s = t.dataset.status;
+          if (s === 'done') {
+            counts.done++;
+            return;
+          }
+          if (s === 'in-progress') { counts.ip++; return; }
+          const ready = t._deps.every(isDone);
+          if (ready) { t.classList.add('is-ready'); counts.ready++; }
+          else { t.classList.add('is-blocked'); counts.blocked++; }
+        });
+
+        tasks.forEach(t => {
+          t.querySelectorAll('.chip').forEach(c => {
+            c.classList.remove('dep-done', 'dep-pending');
+            c.classList.add(isDone(c.dataset.target) ? 'dep-done' : 'dep-pending');
+          });
+          renderTaskStatic(t);
+        });
+
+        const pct = counts.total ? Math.round((counts.done / counts.total) * 100) : 0;
+        const evidencePct = counts.total ? Math.round((counts.evidence / counts.total) * 100) : 0;
+        $('stats').innerHTML = `
+      <div class="progress" style="--pct:${pct}%" title="${counts.done}/${counts.total} 已完成"><span></span></div>
+      <span class="pill done">✓ ${counts.done} / ${counts.total} (${pct}%)</span>
+      <span class="pill hours" title="包含 7 个固定 Section；已完成任务交付物 / 任务总结有内容">证据完整 ${counts.evidence} / ${counts.total} (${evidencePct}%)</span>
+      <span class="pill ready">▶ ${counts.ready} 可开工</span>
+      <span class="pill ip">… ${counts.ip} 进行中</span>
+      <span class="pill">⛔ ${counts.blocked} 被阻塞</span>
+    `;
+        updateHeaderProgressSummary(counts, pct);
+
+        document.querySelectorAll('.phase').forEach(p => {
+          const pt = Array.from(p.querySelectorAll('.task'));
+          const total = pt.length;
+          const doneTasks = pt.filter(t => t.dataset.status === 'done');
+          const done = doneTasks.length;
+          const evidenceDone = pt.filter(t => !missingRequiredSections(t).length && !missingDoneItemSections(t).length).length;
+          const ppct = total ? Math.round((done / total) * 100) : 0;
+          const el = p.querySelector('[data-progress]');
+          if (el) {
+            el.innerHTML = `${done} / ${total} · <span class="phase-pct">${ppct}%</span> <span class="phase-hours" title="证据完整任务数">证据 ${evidenceDone}/${total}</span>`;
+          }
+        });
+
+        if (focused && document.body.contains(focused)) focusTask(focused);
+        else focused = null;
+      }
+
+      // ===== Filter =====
+      function applyFilter(f) {
+        tasks.forEach(t => {
+          let show = true;
+          const s = t.dataset.status;
+          if (f === 'done') show = s === 'done';
+          else if (f === 'in-progress') show = s === 'in-progress';
+          else if (f === 'ready') show = t.classList.contains('is-ready');
+          else if (f === 'blocked') show = t.classList.contains('is-blocked');
+          else if (f === 'not-done') show = s !== 'done';
+          t.classList.toggle('hidden', !show);
+        });
+        document.querySelectorAll('.phase').forEach(p => {
+          const visible = Array.from(p.querySelectorAll('.task')).some(t => !t.classList.contains('hidden'));
+          let placeholder = p.querySelector('.phase-empty');
+          if (!visible) {
+            if (!placeholder) {
+              placeholder = document.createElement('div');
+              placeholder.className = 'phase-empty';
+              placeholder.textContent = '— 无匹配任务 —';
+              p.appendChild(placeholder);
+            }
+            placeholder.style.display = 'block';
+          } else if (placeholder) {
+            placeholder.style.display = 'none';
+          }
+        });
+      }
+      document.querySelectorAll('.filters button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.filters button').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          applyFilter(btn.dataset.filter);
+        });
+      });
+
+      // ===== Hover popover =====
+      const popover = $('task-popover');
+      function renderPopover(t, pinned = false) {
+        const title = escapeHtml(t.querySelector('h3').textContent);
+        const desc = escapeHtml(t.querySelector('p.desc').textContent);
+        const details = t._details || [];
+        let html = pinned ? '<button type="button" class="popover-close" title="关闭任务详情">×</button>' : '';
+        html += `<div class="popover-title">${title}</div>`;
+        if (desc) html += `<div class="popover-desc">${desc}</div>`;
+        if (!details.length) {
+          html += `<div class="popover-empty">暂无任务细则 — 双击卡片可添加</div>`;
+        } else {
+          html += details.map((sec, si) => {
+            const items = (sec.items || []);
+            const num = si + 1;
+            return `
+          <section class="popover-section">
+            <h5><span class="popover-num">${num}.</span> ${escapeHtml(sec.title || '(未命名 Section)')}</h5>
+            ${items.length
+                ? `<ul>${items.map((i, ii) => `<li><span class="popover-num">${num}.${ii + 1}</span> ${escapeHtml(i)}</li>`).join('')}</ul>`
+                : `<div class="popover-empty" style="padding:4px 0;text-align:left;">（无分点）</div>`}
+          </section>`;
+          }).join('');
+        }
+        popover.innerHTML = html;
+        const close = popover.querySelector('.popover-close');
+        if (close) close.onclick = () => hidePopover(true);
+      }
+      function showPopover(t, pinned = false) {
+        if (popoverPinned && !pinned) return;
+        popoverTarget = t;
+        popoverPinned = pinned;
+        renderPopover(t, pinned);
+        popover.classList.add('show');
+        popover.classList.toggle('pinned', pinned);
+        popover.setAttribute('aria-hidden', 'false');
+        positionPopover(t);
+      }
+      function hidePopover(force = false) {
+        if (popoverPinned && !force) return;
+        popoverTarget = null;
+        popoverPinned = false;
+        if (popover) {
+          popover.classList.remove('show', 'pinned');
+          popover.setAttribute('aria-hidden', 'true');
+        }
+      }
+      function positionPopover(t) {
+        const rect = t.getBoundingClientRect();
+        const pw = popover.offsetWidth || 340;
+        const ph = popover.offsetHeight || 200;
+        let left = rect.right + 10;
+        if (left + pw > window.innerWidth - 10) left = rect.left - pw - 10;
+        if (left < 10) left = 10;
+        let top = rect.top;
+        if (top + ph > window.innerHeight - 10) top = Math.max(10, window.innerHeight - ph - 10);
+        popover.style.left = left + 'px';
+        popover.style.top = top + 'px';
+      }
+      window.addEventListener('scroll', () => { if (popoverTarget) positionPopover(popoverTarget); }, true);
+      window.addEventListener('resize', () => { if (popoverTarget) positionPopover(popoverTarget); });
+
+      // ===== Click: focus + dep visualization =====
+      function clearFocus() {
+        document.querySelectorAll('.focus, .focus-dep-done, .focus-dep-pending, .focus-dependent').forEach(el => {
+          el.classList.remove('focus', 'focus-dep-done', 'focus-dep-pending', 'focus-dependent');
+          el.dataset.focusTag = '';
+        });
+        focused = null;
+      }
+      function focusTask(t) {
+        document.querySelectorAll('.focus, .focus-dep-done, .focus-dep-pending, .focus-dependent').forEach(el => {
+          el.classList.remove('focus', 'focus-dep-done', 'focus-dep-pending', 'focus-dependent');
+          el.dataset.focusTag = '';
+        });
+        focused = t;
+        t.classList.add('focus');
+        t.dataset.focusTag = '焦点';
+        t._deps.forEach(d => {
+          const dep = taskMap[d]; if (!dep) return;
+          if (isDone(d)) { dep.classList.add('focus-dep-done'); dep.dataset.focusTag = '前置 · 已完成'; }
+          else { dep.classList.add('focus-dep-pending'); dep.dataset.focusTag = '前置 · 未完成'; }
+        });
+        t._dependents.forEach(d => {
+          const dn = taskMap[d];
+          if (dn) { dn.classList.add('focus-dependent'); dn.dataset.focusTag = '后续'; }
+        });
+      }
+
+      document.addEventListener('click', async e => {
+        const modal = $('edit-modal');
+        if (modal.classList.contains('show')) {
+          if (e.target.closest('.modal-dialog')) return;
+          if (e.target === modal) closeEditModal();
+          return;
+        }
+        if (e.target.closest('#task-popover')) return;
+        const chip = e.target.closest('.chip');
+        if (chip) {
+          const id = chip.dataset.target;
+          const dep = taskMap[id];
+          if (dep) {
+            dep.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+            dep.classList.remove('flash');
+            void dep.offsetWidth;
+            dep.classList.add('flash');
+            setTimeout(() => dep.classList.remove('flash'), 1500);
+          }
+          return;
+        }
+        const badge = e.target.closest('.badge.status');
+        if (badge && hasWriteAccess()) {
+          if (!canEditTasks()) {
+            const task = badge.closest('.task');
+            if (task) {
+              if (focused === task) clearFocus();
+              else focusTask(task);
+              showPopover(task, true);
+            }
+            return;
+          }
+          const clickedTask = badge.closest('.task');
+          const taskId = clickedTask?.id;
+          const reverse = e.shiftKey;
+          if (!taskId) return;
+          if (!await reloadFromDiskBeforeChange()) return;
+          if (!canEditTasks()) {
+            alert('当前为只读模式，请先连接 JSON 启用编辑。');
+            return;
+          }
+          const task = taskMap[taskId];
+          if (task) {
+            const cur = task.dataset.status;
+            let i = STATUS_ORDER.indexOf(cur);
+            if (i === -1) i = 0;
+            const dir = reverse ? -1 : 1;
+            i = (i + dir + STATUS_ORDER.length) % STATUS_ORDER.length;
+            const next = STATUS_ORDER[i];
+            if (!requestStatusChange(task, next)) return;
+            const prev = task.dataset.status;
+            task.dataset.status = next;
+            if (next === 'done' && prev !== 'done') {
+              task._completedAt = nowDateTimeStr();
+            } else if (next !== 'done' && prev === 'done') {
+              task._completedAt = '';
+            }
+            renderTaskStatic(task);
+            refreshDerived();
+            save();
+          } else {
+            alert(`任务 ${taskId} 已不存在，请检查 JSON。`);
+          }
+          return;
+        }
+        const task = e.target.closest('.task');
+        if (task) {
+          if (focused === task) clearFocus();
+          else focusTask(task);
+          showPopover(task, true);
+          return;
+        }
+        clearFocus();
+      });
+
+      // ===== Edit modal =====
+      function openEditModal(t) {
+        if (!canEditTasks()) return;
+        hidePopover(true);
+        refreshDerived();
+        editTargetId = t.id;
+        const modal = $('edit-modal');
+        modal.classList.add('show');
+        $('edit-id').textContent = t.id;
+        $('edit-title').value = t.querySelector('h3').textContent;
+        $('edit-desc').value = t.querySelector('p.desc').textContent;
+        const statusSelect = $('edit-status');
+        statusSelect.value = t.dataset.status;
+        statusSelect.disabled = t.classList.contains('is-blocked');
+        renderEditDeps(t);
+        renderEditDetails(t);
+        updateCascadeWarn(t);
+        $('edit-status').onchange = () => updateCascadeWarn(t);
+        const deleteBtn = $('edit-delete');
+        const dependents = (t._dependents || []).map(id => taskMap[id]).filter(Boolean);
+        deleteBtn.disabled = false;
+        deleteBtn.title = dependents.length
+          ? `还有后续任务依赖它：${formatTaskList(dependents, 10)}`
+          : '删除该任务';
+        setTimeout(() => $('edit-title').focus(), 0);
+      }
+      function closeEditModal() {
+        const modal = $('edit-modal');
+        modal.classList.remove('show');
+        editTargetId = null;
+      }
+      function updateCascadeWarn(t) {
+        const sel = $('edit-status').value;
+        const warn = $('edit-cascade-warn');
+        if (t && t.classList.contains('is-blocked')) {
+          warn.textContent = '⛔ 被阻塞任务不能手动改状态；前置完成后会自动变为可开工';
+        } else if (sel === 'done' && !editDepsCurrent.every(isDone)) {
+          warn.textContent = '⚠ 当前依赖未全部完成，不能保存为已完成';
+        } else warn.textContent = '';
+      }
+
+      function renderEditDeps(t) {
+        editDepsCurrent = [...t._deps];
+        const chipsEl = $('edit-deps-chips');
+        const searchInput = $('edit-deps-search');
+        const suggEl = $('edit-deps-suggestions');
+        function renderChips() {
+          chipsEl.innerHTML = '';
+          if (!editDepsCurrent.length) {
+            const hint = document.createElement('span');
+            hint.style.cssText = 'color:var(--muted);font-size:12px;';
+            hint.textContent = '（无依赖）';
+            chipsEl.appendChild(hint);
+            return;
+          }
+          editDepsCurrent.forEach(d => {
+            const c = document.createElement('span');
+            c.className = 'edit-chip';
+            const dep = taskMap[d];
+            const sp = document.createElement('span'); sp.textContent = d;
+            const btn = document.createElement('button');
+            btn.type = 'button'; btn.textContent = '×';
+            btn.onclick = () => {
+              editDepsCurrent = editDepsCurrent.filter(x => x !== d);
+              renderChips(); refreshSuggestions(); updateCascadeWarn(t);
+            };
+            c.appendChild(sp); c.appendChild(btn);
+            if (dep) c.title = dep.querySelector('h3').textContent;
+            chipsEl.appendChild(c);
+          });
+        }
+        function refreshSuggestions() {
+          const q = searchInput.value.trim().toLowerCase();
+          const matches = tasks.filter(o => {
+            if (o.id === t.id) return false;
+            if (editDepsCurrent.includes(o.id)) return false;
+            if (!q) return true;
+            const title = o.querySelector('h3').textContent.toLowerCase();
+            return o.id.toLowerCase().includes(q) || title.includes(q);
+          }).slice(0, 40);
+          suggEl.innerHTML = '';
+          matches.forEach(o => {
+            const phase = (o.closest('.phase') && o.closest('.phase').dataset.phase) || '?';
+            const item = document.createElement('div');
+            item.className = 'sugg-item';
+            const code = document.createElement('code'); code.textContent = o.id;
+            const sp = document.createElement('span'); sp.className = 'sugg-title';
+            sp.textContent = o.querySelector('h3').textContent;
+            const em = document.createElement('em');
+            const cycle = transitivelyDependsOn(o.id, t.id);
+            if (cycle) {
+              em.textContent = '⛔ 循环依赖';
+              item.style.opacity = '.5';
+              item.style.cursor = 'not-allowed';
+              item.title = `若选 ${o.id} 为前置依赖，会形成循环`;
+            } else {
+              em.textContent = `P${phase} · ${o.dataset.status}`;
+              item.onclick = () => {
+                editDepsCurrent.push(o.id);
+                searchInput.value = '';
+                renderChips(); refreshSuggestions(); updateCascadeWarn(t);
+              };
+            }
+            item.appendChild(code); item.appendChild(sp); item.appendChild(em);
+            suggEl.appendChild(item);
+          });
+        }
+        searchInput.value = '';
+        searchInput.oninput = refreshSuggestions;
+        renderChips();
+        refreshSuggestions();
+      }
+      function transitivelyDependsOn(srcId, targetId, seen) {
+        seen = seen || new Set();
+        if (srcId === targetId) return true;
+        if (seen.has(srcId)) return false;
+        seen.add(srcId);
+        const src = taskMap[srcId];
+        if (!src) return false;
+        for (const d of src._deps) {
+          if (transitivelyDependsOn(d, targetId, seen)) return true;
+        }
+        return false;
+      }
+
+      function renderEditDetails(t) {
+        editDetailsCurrent = JSON.parse(JSON.stringify(t._details || []));
+        redrawDetailsEditor();
+      }
+      function redrawDetailsEditor() {
+        const wrap = $('edit-details');
+        wrap.innerHTML = '';
+        if (!editDetailsCurrent.length) {
+          const empty = document.createElement('div');
+          empty.className = 'edit-details-empty';
+          empty.textContent = '暂无任务细则 — 点击下方按钮添加 Section';
+          wrap.appendChild(empty);
+        }
+        editDetailsCurrent.forEach((sec, si) => {
+          const card = document.createElement('div'); card.className = 'edit-section';
+          const head = document.createElement('div'); head.className = 'edit-section-head';
+          const ti = document.createElement('input');
+          ti.type = 'text'; ti.placeholder = `Section ${si + 1} 标题（如「验收标准」「依赖项」）`;
+          ti.value = sec.title || '';
+          ti.oninput = () => sec.title = ti.value;
+          const rm = document.createElement('button');
+          rm.type = 'button'; rm.className = 'remove-btn'; rm.textContent = '× 删除';
+          rm.onclick = () => { editDetailsCurrent.splice(si, 1); redrawDetailsEditor(); };
+          head.appendChild(ti); head.appendChild(rm);
+          card.appendChild(head);
+          const itemsWrap = document.createElement('div'); itemsWrap.className = 'edit-items';
+          sec.items = sec.items || [];
+          sec.items.forEach((it, ii) => {
+            const row = document.createElement('div'); row.className = 'edit-item-row';
+            const inp = document.createElement('input');
+            inp.type = 'text'; inp.placeholder = `分点 ${ii + 1}`;
+            inp.value = it;
+            inp.oninput = () => sec.items[ii] = inp.value;
+            const rb = document.createElement('button');
+            rb.type = 'button'; rb.textContent = '×';
+            rb.onclick = () => { sec.items.splice(ii, 1); redrawDetailsEditor(); };
+            row.appendChild(inp); row.appendChild(rb);
+            itemsWrap.appendChild(row);
+          });
+          const add = document.createElement('button');
+          add.type = 'button'; add.className = 'add-item-btn'; add.textContent = '+ 添加分点';
+          add.onclick = () => { sec.items.push(''); redrawDetailsEditor(); };
+          itemsWrap.appendChild(add);
+          card.appendChild(itemsWrap);
+          wrap.appendChild(card);
+        });
+        const addSec = document.createElement('button');
+        addSec.type = 'button'; addSec.className = 'add-section-btn'; addSec.textContent = '+ 添加 Section';
+        addSec.onclick = () => { editDetailsCurrent.push({ title: '', items: [''] }); redrawDetailsEditor(); };
+        wrap.appendChild(addSec);
+      }
+
+      async function saveEdit() {
+        if (!editTargetId) return;
+        const targetId = editTargetId;
+        const newTitle = ($('edit-title').value || '').trim() || targetId;
+        const newDesc = ($('edit-desc').value || '').trim();
+        const statusSelect = $('edit-status');
+        const selectedStatus = statusSelect.value;
+        if (!await reloadFromDiskBeforeChange()) return;
+        editTargetId = targetId;
+        const t = taskMap[targetId];
+        if (!t) {
+          alert(`任务 ${targetId} 已不存在，请检查 JSON。`);
+          closeEditModal();
+          return;
+        }
+        const newStatus = t.classList.contains('is-blocked') ? t.dataset.status : selectedStatus;
+
+        if (newStatus !== t.dataset.status) {
+          if (t.classList.contains('is-blocked')) {
+            alert(`${taskRef(t)} 当前是「被阻塞」状态，不能手动转化。
+请先完成它的前置任务；前置全部完成后，它会自动变为「可开工」。`);
+            return;
+          }
+          if (newStatus === 'done' && !editDepsCurrent.every(isDone)) {
+            alert(`${taskRef(t)} 的前置依赖尚未全部完成，不能保存为「已完成」。
+请先完成前置任务，或调整依赖。`);
+            return;
+          }
+          if (!requestStatusChange(t, newStatus)) return;
+        } else if (newStatus === 'done' && !editDepsCurrent.every(isDone)) {
+          alert(`${taskRef(t)} 当前依赖未全部完成，不能保持为「已完成」。
+请先完成前置任务，或把状态改为未完成 / 进行中。`);
+          return;
+        }
+
+        t.querySelector('h3').textContent = newTitle;
+        t.querySelector('p.desc').textContent = newDesc;
+        const prevStatus = t.dataset.status;
+        t.dataset.status = newStatus;
+
+        if (newStatus === 'done' && prevStatus !== 'done') {
+          t._completedAt = nowDateTimeStr();
+        } else if (newStatus !== 'done' && prevStatus === 'done') {
+          t._completedAt = '';
+        }
+
+        t._deps.forEach(d => {
+          const dep = taskMap[d];
+          if (dep) dep._dependents = dep._dependents.filter(x => x !== t.id);
+        });
+        t._deps = [...editDepsCurrent];
+        t.dataset.deps = t._deps.join(' ');
+        t._deps.forEach(d => {
+          const dep = taskMap[d];
+          if (dep && !dep._dependents.includes(t.id)) dep._dependents.push(t.id);
+        });
+        t._details = editDetailsCurrent
+          .map(s => ({
+            title: (s.title || '').trim(),
+            items: (s.items || []).map(i => (i || '').trim()).filter(Boolean),
+          }))
+          .filter(s => s.title || s.items.length);
+        renderTaskStatic(t);
+        closeEditModal();
+        refreshDerived();
+        save();
+      }
+
+      async function deleteCurrentTask() {
+        if (!editTargetId) return;
+        const targetId = editTargetId;
+        if (!await reloadFromDiskBeforeChange()) return;
+        editTargetId = targetId;
+        const t = taskMap[targetId];
+        if (!t) {
+          alert(`任务 ${targetId} 已不存在，请检查 JSON。`);
+          closeEditModal();
+          return;
+        }
+        refreshDerived();
+        const dependents = (t._dependents || []).map(id => taskMap[id]).filter(Boolean);
+        if (dependents.length) {
+          alert(`不能删除 ${taskRef(t)}。
+它还有后续任务依赖：${formatTaskList(dependents, 10)}。
+请先到这些后续任务里移除依赖，再删除这个任务。`);
+          return;
+        }
+        if (!window.confirm([
+          '确认删除任务吗？',
+          `• 任务：${taskRef(t)}`,
+          '• 删除后会从看板和 JSON 中移除',
+          '• 此操作无法撤销',
+        ].join('\\n'))) return;
+
+        (t._deps || []).forEach(d => {
+          const dep = taskMap[d];
+          if (dep) dep._dependents = dep._dependents.filter(x => x !== t.id);
+        });
+        tasks = tasks.filter(item => item !== t);
+        delete taskMap[t.id];
+        if (focused === t) focused = null;
+        t.remove();
+        closeEditModal();
+        refreshDerived();
+        save();
+      }
+
+      $('edit-save').onclick = saveEdit;
+      $('edit-delete').onclick = deleteCurrentTask;
+      $('edit-cancel').onclick = closeEditModal;
+
+      // ===== Serialize / Save / Load =====
+      function serialize() {
+        const phases = [];
+        document.querySelectorAll('.phase').forEach(p => {
+          const num = parseInt(p.dataset.phase);
+          const title = p.querySelector('.phase-title').textContent;
+          const phaseTasks = [];
+          p.querySelectorAll('.task').forEach(t => {
+            phaseTasks.push({
+              id: t.id,
+              title: t.querySelector('h3').textContent,
+              desc: t.querySelector('p.desc').textContent,
+              status: t.dataset.status,
+              deps: (t._deps || []).slice(),
+              completedAt: t._completedAt || '',
+              details: t._details || [],
+            });
+          });
+          phases.push({ num, title, tasks: phaseTasks });
+        });
+        return {
+          version: JSON_VERSION,
+          title: boardTitle || '',
+          phases,
+        };
+      }
+
+      function cloneJson(value) {
+        return JSON.parse(JSON.stringify(value == null ? null : value));
+      }
+      function jsonEqual(a, b) {
+        return JSON.stringify(a == null ? null : a) === JSON.stringify(b == null ? null : b);
+      }
+      function validateBoardJson(data) {
+        if (!data || typeof data !== 'object' || !Array.isArray(data.phases)) {
+          throw new Error('文件不是有效的看板 JSON（缺少 phases 字段）');
+        }
+      }
+      async function readBoardJsonFromHandle(h) {
+        const f = await h.getFile();
+        const text = await f.text();
+        let data;
+        try { data = JSON.parse(text); }
+        catch (e) { throw new Error('JSON 解析失败：' + e.message); }
+        validateBoardJson(data);
+        return { text, data };
+      }
+      function eachTask(data, fn) {
+        (data?.phases || []).forEach((phase, phaseIndex) => {
+          (phase.tasks || []).forEach((task, taskIndex) => fn(task, phase, phaseIndex, taskIndex));
+        });
+      }
+      function taskIndexById(data) {
+        const map = Object.create(null);
+        eachTask(data, (task, phase, phaseIndex, taskIndex) => {
+          if (task?.id) map[task.id] = { task, phase, phaseIndex, taskIndex };
+        });
+        return map;
+      }
+      function removeTaskById(data, id) {
+        (data.phases || []).forEach(phase => {
+          if (!Array.isArray(phase.tasks)) return;
+          phase.tasks = phase.tasks.filter(task => task.id !== id);
+        });
+      }
+      function mergeLocalChanges(baseData, localData, latestData) {
+        const base = baseData || { phases: [] };
+        const merged = cloneJson(latestData || base || localData);
+        const boardKeys = ['version', 'title'];
+        boardKeys.forEach(key => {
+          if (!jsonEqual(base[key], localData[key])) merged[key] = cloneJson(localData[key]);
+        });
+
+        const baseTasks = taskIndexById(base);
+        const localTasks = taskIndexById(localData);
+        const latestTasks = taskIndexById(merged);
+        Object.keys(baseTasks).forEach(id => {
+          if (!localTasks[id]) removeTaskById(merged, id);
+        });
+
+        const taskKeys = [
+          'title', 'desc', 'status', 'deps', 'completedAt', 'details',
+        ];
+        Object.keys(localTasks).forEach(id => {
+          const localTask = localTasks[id].task;
+          const baseTask = baseTasks[id]?.task || {};
+          let latestTask = latestTasks[id]?.task;
+          if (!latestTask && !baseTasks[id]) {
+            const localPhaseIndex = localTasks[id].phaseIndex;
+            const targetPhase = merged.phases?.[localPhaseIndex] || merged.phases?.[0];
+            if (!targetPhase) return;
+            if (!Array.isArray(targetPhase.tasks)) targetPhase.tasks = [];
+            targetPhase.tasks.push(cloneJson(localTask));
+            return;
+          }
+          if (!latestTask) return;
+          taskKeys.forEach(key => {
+            if (!jsonEqual(baseTask[key], localTask[key])) latestTask[key] = cloneJson(localTask[key]);
+          });
+        });
+        return merged;
+      }
+      async function reloadFromDiskBeforeChange() {
+        if (!conn.handle) return true;
+        try {
+          await loadFromHandle(conn.handle);
+          return true;
+        } catch (e) {
+          setConn('disconnected', '重新加载失败：' + e.message, conn.fileName);
+          alert('重新加载 JSON 失败：' + e.message);
+          return false;
+        }
+      }
+
+      async function loadFromHandle(h) {
+        const { text, data } = await readBoardJsonFromHandle(h);
+        lastLoadedText = text;
+        lastLoadedData = cloneJson(data);
+        renderBoard(data);
+      }
+
+      async function save() {
+        if (!conn.handle) return;
+        const localData = serialize();
+        let data = lastLoadedData ? mergeLocalChanges(lastLoadedData, localData, lastLoadedData) : localData;
+        let shouldRenderAfterSave = false;
+        try {
+          const latest = await readBoardJsonFromHandle(conn.handle);
+          shouldRenderAfterSave = latest.text !== lastLoadedText;
+          data = mergeLocalChanges(lastLoadedData || localData, localData, latest.data);
+          const w = await conn.handle.createWritable();
+          const text = JSON.stringify(data, null, 2) + '\n';
+          await w.write(text);
+          await w.close();
+          lastLoadedText = text;
+          lastLoadedData = cloneJson(data);
+          if (shouldRenderAfterSave) renderBoard(data);
+          flashSaved();
+        } catch (e) {
+          setConn('disconnected', '写入失败：' + e.message);
+        }
+      }
+
+      // ===== CSV export =====
+      function flattenDetails(details) {
+        if (!details || !details.length) return '';
+        return details.map((sec, si) => {
+          const num = si + 1;
+          const lines = [`${num}. ${sec.title || '(无标题)'}`];
+          (sec.items || []).forEach((it, ii) => lines.push(`  ${num}.${ii + 1} ${it}`));
+          return lines.join('\n');
+        }).join('\n');
+      }
+      function csvEscape(v) {
+        const s = String(v == null ? '' : v);
+        if (/[,"\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+        return s;
+      }
+      function downloadCSV(rows, filePrefix) {
+        const csv = rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
+        const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const d = new Date();
+        const pad = n => n.toString().padStart(2, '0');
+        a.download = `${filePrefix}-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.csv`;
+        a.href = url;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      function exportCSV() {
+        if (!tasks.length) {
+          alert('当前看板为空，没有可导出的任务。请先连接 JSON。');
+          return;
+        }
+        cascadeValidate();
+        const rows = [[
+          '任务 ID', '阶段 ID', '阶段', ' 任务名称', '描述',
+          '状态', 'derived', '完成时间', '证据完整', '缺失 Section', '完成态缺失内容',
+          '依赖项', 'dependents', '细节'
+        ]];
+        document.querySelectorAll('.phase').forEach(p => {
+          const num = parseInt(p.dataset.phase);
+          const ptitle = p.querySelector('.phase-title').textContent;
+          p.querySelectorAll('.task').forEach(t => {
+            const s = t.dataset.status;
+            let derived = s;
+            if (s === 'planned') derived = t._deps.every(isDone) ? 'ready' : 'blocked';
+            const missing = missingRequiredSections(t);
+            const doneMissing = missingDoneItemSections(t);
+            rows.push([
+              t.id,
+              num,
+              ptitle,
+              t.querySelector('h3').textContent,
+              t.querySelector('p.desc').textContent,
+              s,
+              derived,
+              t._completedAt || '',
+              missing.length || doneMissing.length ? '否' : '是',
+              missing.join(' / '),
+              doneMissing.join(' / '),
+              (t._deps || []).join(' '),
+              (t._dependents || []).join(' '),
+              flattenDetails(t._details || []),
+            ]);
+          });
+        });
+        downloadCSV(rows, 'SpecDrivenDevelopmentBoard');
+      }
+
+      // ===== File System Access API =====
+      const fsaSupported = 'showOpenFilePicker' in window;
+      const conn = { handle: null, fileName: null };
+      const bar = $('conn-bar');
+      const lblEl = $('conn-label');
+      const fileEl = $('conn-file');
+      const actionBtn = $('conn-action');
+      const disconnectBtn = $('conn-disconnect');
+      const savedEl = $('conn-saved');
+      const exportBtn = $('export-csv');
+
+      function openIDB() {
+        return new Promise((res, rej) => {
+          const r = indexedDB.open(DB_NAME, 1);
+          r.onupgradeneeded = () => r.result.createObjectStore(STORE);
+          r.onsuccess = () => res(r.result);
+          r.onerror = () => rej(r.error);
+        });
+      }
+      async function idbGet(key) {
+        const db = await openIDB();
+        return new Promise((res, rej) => {
+          const r = db.transaction(STORE, 'readonly').objectStore(STORE).get(key);
+          r.onsuccess = () => res(r.result);
+          r.onerror = () => rej(r.error);
+        });
+      }
+      async function idbPut(key, val) {
+        const db = await openIDB();
+        return new Promise((res, rej) => {
+          const tx = db.transaction(STORE, 'readwrite');
+          tx.objectStore(STORE).put(val, key);
+          tx.oncomplete = () => res();
+          tx.onerror = () => rej(tx.error);
+        });
+      }
+      async function idbDel(key) {
+        const db = await openIDB();
+        return new Promise((res, rej) => {
+          const tx = db.transaction(STORE, 'readwrite');
+          tx.objectStore(STORE).delete(key);
+          tx.oncomplete = () => res();
+          tx.onerror = () => rej(tx.error);
+        });
+      }
+
+      function setConn(state, label, file) {
+        bar.classList.remove('is-connected', 'is-pending');
+        if (state === 'connected') {
+          bar.classList.add('is-connected');
+          document.body.classList.add('editable');
+          actionBtn.hidden = true;
+          disconnectBtn.hidden = false;
+        } else if (state === 'pending') {
+          bar.classList.add('is-pending');
+          document.body.classList.remove('editable');
+          actionBtn.hidden = false;
+          actionBtn.textContent = '恢复连接';
+          disconnectBtn.hidden = false;
+        } else {
+          document.body.classList.remove('editable');
+          actionBtn.hidden = false;
+          actionBtn.textContent = '连接 spec-tasks.json';
+          disconnectBtn.hidden = true;
+        }
+        lblEl.textContent = label;
+        fileEl.textContent = file || '';
+        updateHeaderConnectionSummary(label, file || '');
+      }
+
+      let saveTimer;
+      function flashSaved() {
+        const t = new Date();
+        const pad = n => n.toString().padStart(2, '0');
+        savedEl.textContent = `已保存 ${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
+        savedEl.classList.add('show');
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => savedEl.classList.remove('show'), 2500);
+      }
+
+      async function pick() {
+        try {
+          const [h] = await window.showOpenFilePicker({
+            types: [{ description: 'Spec Tasks JSON', accept: { 'application/json': ['.json'] } }],
+            multiple: false,
+          });
+          try {
+            await loadFromHandle(h);
+          } catch (e) {
+            alert('加载失败：' + e.message);
+            return;
+          }
+          const perm = await h.requestPermission({ mode: 'readwrite' });
+          if (perm !== 'granted') {
+            alert('需要写入权限以保存改动');
+            setConn('pending', '只读', h.name);
+            return;
+          }
+          conn.handle = h; conn.fileName = h.name;
+          await idbPut(HANDLE_KEY, h);
+          setConn('connected', '已连接', h.name);
+        } catch (e) {
+          if (e.name !== 'AbortError') alert('连接失败：' + e.message);
+        }
+      }
+      async function reconnect() {
+        if (!conn.handle) return;
+        try {
+          const perm = await conn.handle.requestPermission({ mode: 'readwrite' });
+          if (perm === 'granted') {
+            try { await loadFromHandle(conn.handle); }
+            catch (e) {
+              setConn('disconnected', '加载失败：' + e.message);
+              await idbDel(HANDLE_KEY); conn.handle = null;
+              return;
+            }
+            setConn('connected', '已连接', conn.fileName);
+          } else setConn('pending', '权限被拒', conn.fileName);
+        } catch (e) {
+          setConn('disconnected', '恢复失败');
+          await idbDel(HANDLE_KEY); conn.handle = null;
+        }
+      }
+      async function disconnect() {
+        conn.handle = null; conn.fileName = null;
+        await idbDel(HANDLE_KEY);
+        setConn('disconnected', '已断开');
+      }
+
+      // ===== Fallback: <input type=file> (Safari/Firefox 只读加载) =====
+      function setupReadOnlyLoad() {
+        const inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = '.json,application/json'; inp.hidden = true;
+        inp.addEventListener('change', async () => {
+          const f = inp.files[0]; if (!f) return;
+          try {
+            const text = await f.text();
+            const data = JSON.parse(text);
+            if (!data || !Array.isArray(data.phases)) {
+              alert('文件不是有效的看板 JSON');
+              return;
+            }
+            renderBoard(data);
+            setConn('pending', '只读已加载（无法回写）', f.name);
+          } catch (e) {
+            alert('加载失败：' + e.message);
+          }
+        });
+        document.body.appendChild(inp);
+        return inp;
+      }
+
+      async function initFSA() {
+        if (!fsaSupported) {
+          bar.classList.add('fsa-unsupported');
+          lblEl.textContent = '当前浏览器不支持 File System Access API';
+          fileEl.textContent = '可加载 JSON 只读查看';
+          updateHeaderConnectionSummary('只读模式', '可加载 JSON');
+          const inp = setupReadOnlyLoad();
+          actionBtn.textContent = '加载 JSON（只读）';
+          actionBtn.classList.remove('primary');
+          actionBtn.addEventListener('click', () => inp.click());
+          disconnectBtn.hidden = true;
+          return;
+        }
+        actionBtn.addEventListener('click', async () => {
+          if (conn.handle) await reconnect();
+          else await pick();
+        });
+        disconnectBtn.addEventListener('click', disconnect);
+        try {
+          const stored = await idbGet(HANDLE_KEY);
+          if (stored) {
+            conn.handle = stored; conn.fileName = stored.name;
+            const perm = await stored.queryPermission({ mode: 'readwrite' });
+            if (perm === 'granted') await reconnect();
+            else setConn('pending', '需重新授权', stored.name);
+          } else setConn('disconnected', '未连接');
+        } catch (e) { setConn('disconnected', '初始化失败'); }
+      }
+
+      // ===== CSV button =====
+      initHeaderCollapse();
+      exportBtn.addEventListener('click', exportCSV);
+
+      // ===== Keyboard =====
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+          const modal = $('edit-modal');
+          if (modal.classList.contains('show')) { closeEditModal(); return; }
+          if (popover && popover.classList.contains('show')) { hidePopover(true); return; }
+          if (focused) clearFocus();
+          return;
+        }
+        const inField = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT';
+        if (inField) {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && $('edit-modal').classList.contains('show')) {
+            e.preventDefault(); saveEdit();
+          }
+          return;
+        }
+        if ($('edit-modal').classList.contains('show')) return;
+        const map = { a: 'all', r: 'ready', i: 'in-progress', b: 'blocked', d: 'done', n: 'not-done' };
+        const f = map[e.key.toLowerCase()];
+        if (f) {
+          const btn = document.querySelector(`.filters button[data-filter="${f}"]`);
+          if (btn) btn.click();
+        }
+      });
+
+      // ===== Board title click-to-edit =====
+      const titleEl = $('board-title');
+      if (titleEl) {
+        titleEl.addEventListener('click', async () => {
+          if (!document.body.classList.contains('editable')) return;
+          if (!await reloadFromDiskBeforeChange()) return;
+          const cur = boardTitle || titleEl.textContent || '';
+          const next = window.prompt('修改面板标题（写回 JSON）：', cur);
+          if (next == null) return;
+          const trimmed = next.trim();
+          if (trimmed === (cur || '').trim()) return;
+          boardTitle = trimmed;
+          applyBoardTitle();
+          save();
+        });
+      }
+
+      applyBoardStage();
+
+      // ===== 整体截图（含 scrollview 外部分） =====
+      const screenshotBtn = $('export-png');
+      if (screenshotBtn) screenshotBtn.addEventListener('click', takeFullPageScreenshot);
+
+      async function takeFullPageScreenshot() {
+        if (typeof html2canvas === 'undefined') {
+          alert('截图组件 html2canvas 未加载（可能离线或被网络拦截）。\n请联网后刷新页面再试，或本地引入 html2canvas.min.js。');
+          return;
+        }
+        if (!tasks.length) {
+          alert('当前看板为空，先连接 JSON 再截图。');
+          return;
+        }
+        const btn = screenshotBtn;
+        const orig = btn.textContent;
+        btn.textContent = '截图中…';
+        btn.disabled = true;
+        hidePopover(true);
+        clearFocus();
+
+        // 备份并临时改样式：展开横向滚动、关闭 sticky header、滚到 (0,0)
+        const main = document.querySelector('main');
+        const header = document.querySelector('header');
+        const savedMainOverflow = main.style.overflow;
+        const savedMainPadding = main.style.padding;
+        const savedHeaderPos = header.style.position;
+        const savedScrollX = window.scrollX;
+        const savedScrollY = window.scrollY;
+        const savedBodyMinWidth = document.body.style.minWidth;
+
+        main.style.overflow = 'visible';
+        header.style.position = 'static';
+        window.scrollTo(0, 0);
+
+        // 让 phase-grid 决定宽度
+        const grid = document.querySelector('.phase-grid');
+        const gridWidth = grid ? grid.scrollWidth : 0;
+        const mainPadH = 48; // 与 CSS main 的左右内边距 24+24 对应
+        const fullWidth = Math.max(document.documentElement.scrollWidth, gridWidth + mainPadH, window.innerWidth);
+        document.body.style.minWidth = fullWidth + 'px';
+
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+        const fullHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, window.innerHeight);
+
+        try {
+          const scale = Math.min(window.devicePixelRatio || 1, 2);
+          const canvas = await html2canvas(document.documentElement, {
+            width: fullWidth,
+            height: fullHeight,
+            windowWidth: fullWidth,
+            windowHeight: fullHeight,
+            x: 0,
+            y: 0,
+            scrollX: 0,
+            scrollY: 0,
+            backgroundColor: '#fafafa',
+            useCORS: true,
+            scale,
+            logging: false,
+          });
+          await new Promise((resolve, reject) => {
+            canvas.toBlob(blob => {
+              if (!blob) { reject(new Error('生成 PNG 失败')); return; }
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              const d = new Date();
+              const stamp = `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
+              const base = (boardTitle || 'SpecDrivenDevelopmentBoard').replace(/[\\/:*?"<>|]/g, '_');
+              a.download = `${base}-${stamp}.png`;
+              a.href = url;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              setTimeout(() => URL.revokeObjectURL(url), 1500);
+              resolve();
+            }, 'image/png');
+          });
+        } catch (e) {
+          alert('截图失败：' + (e && e.message ? e.message : e));
+        } finally {
+          main.style.overflow = savedMainOverflow;
+          main.style.padding = savedMainPadding;
+          header.style.position = savedHeaderPos;
+          document.body.style.minWidth = savedBodyMinWidth;
+          window.scrollTo(savedScrollX, savedScrollY);
+          btn.textContent = orig;
+          btn.disabled = false;
+        }
+      }
+
+      initFSA();
+    })();
+  </script>
+</body>
+
+</html>
