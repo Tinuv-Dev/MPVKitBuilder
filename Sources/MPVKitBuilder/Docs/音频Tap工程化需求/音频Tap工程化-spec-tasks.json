@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 2,
   "title": "音频 Tap 三路径 · 工程化与无害化（构建/消费两段式流水线）",
   "phases": [
     {
@@ -945,7 +945,7 @@
           "id": "b1-single-build",
           "title": "[构建端] 应用全部补丁后单次构建出包",
           "desc": "在 Phase 2 所有构建端代码/补丁修改完成后，应用全部补丁、force=libmpv 重编、产出 Libmpv.xcframework。这是整轮唯一构建点，构建物验证在 Phase 4、消费侧改与验证在 Phase 5/6。",
-          "status": "planned",
+          "status": "done",
           "deps": [
             "c1-public-headers",
             "c2-meson-gate",
@@ -960,7 +960,7 @@
             "h1-bug-decoder-ctx",
             "h2-bug-retry-drop"
           ],
-          "completedAt": "",
+          "completedAt": "2026.05.30 23:10",
           "details": [
             {
               "title": "事实",
@@ -1018,11 +1018,11 @@
           "id": "c3-symbol-verify",
           "title": "[构建物] 符号导出与开关校验（c2 + 三组回调符号）",
           "desc": "出包后用 nm 校验：开关 enabled 时三组 set_callback 符号在目标 slice 为已定义（T），disabled 时查不到对应符号，防 LTO / dead-strip 误删。",
-          "status": "planned",
+          "status": "done",
           "deps": [
             "b1-single-build"
           ],
-          "completedAt": "",
+          "completedAt": "2026.05.30 23:14",
           "details": [
             {
               "title": "事实",
@@ -1071,11 +1071,11 @@
           "id": "cv-headers-artifact",
           "title": "[构建物] 公开头产物可见性验证（c1）",
           "desc": "出包后确认 iovis_tap.h / iovis_lookahead.h 在产物 include 路径可见、字段结构与补丁一致；消费侧 import 编译归 cv-public-headers-consumer。",
-          "status": "planned",
+          "status": "done",
           "deps": [
             "b1-single-build"
           ],
-          "completedAt": "",
+          "completedAt": "2026.05.30 23:16",
           "details": [
             {
               "title": "事实",
