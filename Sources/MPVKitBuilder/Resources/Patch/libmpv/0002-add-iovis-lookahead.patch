@@ -348,14 +348,34 @@ index 0000000..fd4f680
 +
 +#endif
 diff --git a/meson.build b/meson.build
-index fb10be5..838e28a 100644
+index fb10be5..1138ada 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -93,6 +93,7 @@ sources = files(
-     'demux/cue.c',
-     'demux/cache.c',
-     'demux/demux.c',
-+    'demux/iovis_lookahead.c',
-     'demux/demux_cue.c',
-     'demux/demux_disc.c',
-     'demux/demux_edl.c',
+@@ -579,6 +579,13 @@ features += {'vector': cc.has_function_attribute('vector_size', required: get_op
+ 
+ sources += path_source + timer_source
+ 
++# Iovis lookahead audio tap (demux): ahead-package-tap + ahead-pcm-tap share this
++# unit. Gated by -Diovis_lookahead so it can be compiled out for compliance audit
++# / lean builds; the Apple builder opts in. Default disabled keeps stock builds clean.
++if get_option('iovis_lookahead').allowed()
++    sources += files('demux/iovis_lookahead.c')
++endif
++
+ 
+ # various file generations
+ tools_directory = join_paths(source_root, 'TOOLS')
+diff --git a/meson.options b/meson.options
+index 52782f7..a50fcb4 100644
+--- a/meson.options
++++ b/meson.options
+@@ -19,6 +19,9 @@ option('lcms2', type: 'feature', value: 'auto', description: 'LCMS2 support')
+ option('libarchive', type: 'feature', value: 'auto', description: 'libarchive wrapper for reading zip files and more')
+ option('libavdevice', type: 'feature', value: 'auto', description: 'libavdevice')
+ option('libbluray', type: 'feature', value: 'auto', description: 'Bluray support')
++# Iovis lookahead audio tap (vendor addition: ahead-package-tap + ahead-pcm-tap).
++# Default disabled; the Apple builder enables it via -Diovis_lookahead=enabled.
++option('iovis_lookahead', type: 'feature', value: 'disabled', description: 'Iovis lookahead audio tap (demux)')
+ option('lua',
+     type: 'combo',
+     choices: ['lua', 'lua52', 'lua5.2', 'lua-5.2', 'luajit', 'lua51',

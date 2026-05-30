@@ -260,7 +260,7 @@
           "id": "c2-meson-gate",
           "title": "meson 编译开关 -Diovis_tap / -Diovis_lookahead",
           "desc": "为两条工程化路径加 meson 选项（默认按平台 gate，Apple 平台 enabled），在 LibMpvBuilder 追加，替代当前无条件编入 sources，便于关闭与合规审计。",
-          "status": "planned",
+          "status": "done",
           "deps": [
             "f1-disposition-decision"
           ],
@@ -304,11 +304,20 @@
             },
             {
               "title": "交付物",
-              "items": []
+              "items": [
+                "meson.options 新增 feature 选项 iovis_tap / iovis_lookahead（默认 disabled），随 0001/0002 补丁落地。",
+                "0001 把 audio/out/iovis_tap.c、0002 把 demux/iovis_lookahead.c 从 sources=files(...) 无条件块移出，改为 if get_option('iovis_*').allowed() sources += files(...) 的 gate 块（仿 mpv cplugins/android 既有 .allowed() 写法）。",
+                "LibMpvBuilder.swift 新增 iovisTapOptions(platform:)，在 mesonExtraSetupArguments 追加 -Diovis_tap=enabled / -Diovis_lookahead=enabled，对所有 Apple 平台启用。",
+                "ahead-pcm-tap 与 ahead-package-tap 当前共用 iovis_lookahead.c，故合用同一 -Diovis_lookahead 开关；c5-ahead-split 拆分后是否独立开关再定。"
+              ]
             },
             {
               "title": "任务总结",
-              "items": []
+              "items": [
+                "三补丁顺序 git apply 干净无 reject（0001→0002→0003 实测通过），两 .c 仅在条件块内引用，stock 默认 disabled。",
+                "swift build 通过，meson 选项语法与 mpv .allowed() 范式一致。",
+                "enabled/disabled 两态符号入包的产物级验证留待 c3-symbol-verify（构建后）。"
+              ]
             }
           ]
         },

@@ -127,14 +127,34 @@ index 0000000..30bd49f
 +
 +#endif
 diff --git a/meson.build b/meson.build
-index fb10be5..8410ae0 100644
+index fb10be5..f187253 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -74,6 +74,7 @@ sources = files(
-     'audio/out/ao_null.c',
-     'audio/out/ao_pcm.c',
-     'audio/out/buffer.c',
-+    'audio/out/iovis_tap.c',
+@@ -267,6 +267,13 @@ sources = files(
+     'ta/ta_utils.c',
+ )
  
-     ## Core
-     'common/av_common.c',
++# Iovis realtime PCM tap (audio/out). Gated by -Diovis_tap so it can be
++# compiled out entirely for compliance audit / lean builds; the Apple builder
++# opts in. Default disabled keeps stock mpv builds unchanged.
++if get_option('iovis_tap').allowed()
++    sources += files('audio/out/iovis_tap.c')
++endif
++
+ 
+ # compiler stuff
+ cc = meson.get_compiler('c')
+diff --git a/meson.options b/meson.options
+index 52782f7..7011605 100644
+--- a/meson.options
++++ b/meson.options
+@@ -39,6 +39,9 @@ option('zimg', type: 'feature', value: 'auto', description: 'libzimg support (hi
+ option('zlib', type: 'feature', value: 'auto', description: 'zlib')
+ 
+ # audio output features
++# Iovis realtime PCM tap (vendor addition). Default disabled; the Apple builder
++# enables it via -Diovis_tap=enabled so stock mpv builds stay unaffected.
++option('iovis_tap', type: 'feature', value: 'disabled', description: 'Iovis realtime PCM tap (audio/out)')
+ option('alsa', type: 'feature', value: 'auto', description: 'ALSA audio output')
+ option('audiounit', type: 'feature', value: 'auto', description: 'AudioUnit output (iOS)')
+ option('coreaudio', type: 'feature', value: 'auto', description: 'CoreAudio audio output')

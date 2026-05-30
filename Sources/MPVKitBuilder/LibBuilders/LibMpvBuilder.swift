@@ -35,6 +35,7 @@ final class LibMpvBuilder: MesonBuilder {
         args.append(contentsOf: dependencyOptions(platform: platform, arch: arch))
         args.append(contentsOf: gpuOptions(platform: platform, arch: arch))
         args.append(contentsOf: appleOptions(platform: platform))
+        args.append(contentsOf: iovisTapOptions(platform: platform))
         return args
     }
 
@@ -198,6 +199,18 @@ extension LibMpvBuilder {
                 "-Davfoundation=disabled",
             ]
         }
+    }
+
+    // Iovis 音频 tap 的编译开关（补丁 0001/0002 把对应 .c 改为按 meson option gate）。
+    // meson option 默认 disabled，stock mpv 构建不编入；本 builder 只产出 Apple 平台，
+    // 三条 tap 路径（realtime/ahead-package/ahead-pcm）均挂在平台无关的 buffer.c / demux.c，
+    // 故所有 Apple 平台统一 enabled。关闭只需把对应行改为 disabled，符号即不入产物，
+    // 便于合规审计与精简产物（产物级符号校验见 c3-symbol-verify）。
+    func iovisTapOptions(platform: PlatformType) -> [String] {
+        [
+            "-Diovis_tap=enabled",
+            "-Diovis_lookahead=enabled",
+        ]
     }
 
     func dependencyIsBuilt(_ dependency: Library, platform: PlatformType, arch: ArchType) -> Bool {
