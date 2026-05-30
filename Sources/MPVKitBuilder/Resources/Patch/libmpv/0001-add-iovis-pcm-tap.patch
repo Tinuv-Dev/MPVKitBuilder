@@ -1,16 +1,18 @@
 diff --git a/audio/out/buffer.c b/audio/out/buffer.c
-index 277b524..9e46ee0 100644
+index 277b524..e69cda2 100644
 --- a/audio/out/buffer.c
 +++ b/audio/out/buffer.c
-@@ -23,6 +23,7 @@
+@@ -23,6 +23,9 @@
  
  #include "ao.h"
  #include "internal.h"
++#ifdef HAVE_IOVIS_TAP
 +#include "iovis_tap.h"
++#endif
  #include "audio/aframe.h"
  #include "audio/format.h"
  
-@@ -117,7 +118,7 @@ struct mp_async_queue *ao_get_queue(struct ao *ao)
+@@ -117,7 +120,7 @@ struct mp_async_queue *ao_get_queue(struct ao *ao)
  
  // Special behavior with data==NULL: caller uses p->pending.
  static int read_buffer(struct ao *ao, void **data, int samples, bool *eof,
@@ -19,7 +21,7 @@ index 277b524..9e46ee0 100644
  {
      struct buffer_state *p = ao->buffer_state;
      int pos = 0;
-@@ -144,6 +145,10 @@ static int read_buffer(struct ao *ao, void **data, int samples, bool *eof,
+@@ -144,6 +147,10 @@ static int read_buffer(struct ao *ao, void **data, int samples, bool *eof,
          int copy = mp_aframe_get_size(p->pending);
          uint8_t **fdata = mp_aframe_get_data_ro(p->pending);
          copy = MPMIN(copy, samples - pos);
@@ -30,7 +32,7 @@ index 277b524..9e46ee0 100644
          for (int n = 0; n < ao->num_planes; n++) {
              memcpy((char *)data[n] + pos * ao->sstride,
                     fdata[n], copy * ao->sstride);
-@@ -176,12 +181,13 @@ static int read_buffer(struct ao *ao, void **data, int samples, bool *eof,
+@@ -176,12 +183,13 @@ static int read_buffer(struct ao *ao, void **data, int samples, bool *eof,
  }
  
  static int ao_read_data_locked(struct ao *ao, void **data, int samples,
@@ -46,7 +48,7 @@ index 277b524..9e46ee0 100644
  
      if (pos > 0)
          p->end_time_ns = out_time_ns;
-@@ -220,10 +226,14 @@ int ao_read_data(struct ao *ao, void **data, int samples, int64_t out_time_ns, b
+@@ -220,10 +228,18 @@ int ao_read_data(struct ao *ao, void **data, int samples, int64_t out_time_ns, b
          eof = &eof_buf;
      }
  
@@ -57,12 +59,16 @@ index 277b524..9e46ee0 100644
  
      mp_mutex_unlock(&p->lock);
  
++#ifdef HAVE_IOVIS_TAP
 +    iovis_tap_feed(ao, data, pos, out_time_ns, stream_pts);
++#else
++    (void)stream_pts;
++#endif
 +
      return pos;
  }
  
-@@ -645,7 +655,7 @@ static bool ao_play_data(struct ao *ao)
+@@ -645,7 +661,7 @@ static bool ao_play_data(struct ao *ao)
      bool got_eof = false;
      if (ao->driver->write_frames) {
          TA_FREEP(&p->pending);
@@ -71,7 +77,7 @@ index 277b524..9e46ee0 100644
          planes = (void **)&p->pending;
      } else {
          if (!realloc_buf(ao, space)) {
-@@ -662,7 +672,7 @@ static bool ao_play_data(struct ao *ao)
+@@ -662,7 +678,7 @@ static bool ao_play_data(struct ao *ao)
          }
  
          if (!samples) {
@@ -82,10 +88,10 @@ index 277b524..9e46ee0 100644
          }
 diff --git a/audio/out/iovis_tap.c b/audio/out/iovis_tap.c
 new file mode 100644
-index 0000000..448b48c
+index 0000000..44770da
 --- /dev/null
 +++ b/audio/out/iovis_tap.c
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,95 @@
 +/*
 + * iovis PCM tap - see iovis_tap.h.
 + *
@@ -97,6 +103,7 @@ index 0000000..448b48c
 + */
 +
 +#include <stdatomic.h>
++#include <stdlib.h>
 +#ifdef IOVIS_TAP_LOG
 +#include <inttypes.h>
 +#endif
@@ -112,13 +119,26 @@ index 0000000..448b48c
 +// the same pointer stored in ao->global / demuxer->global for that instance.
 +struct mpv_global *mp_client_get_global(struct mpv_handle *handle);
 +
-+static _Atomic(iovis_tap_callback) g_cb = NULL;
-+static _Atomic(void *) g_user = NULL;
++// (cb, user) published as one immutable unit so feed never sees a torn pair
++// (old cb + new/NULL user). File-private storage type; not a public symbol.
++struct iovis_tap_reg { iovis_tap_callback cb; void *user; };
++static _Atomic(struct iovis_tap_reg *) g_reg = NULL;
 +
 +void iovis_tap_set_callback(iovis_tap_callback cb, void *user)
 +{
-+    atomic_store(&g_user, user);
-+    atomic_store(&g_cb, cb);
++    struct iovis_tap_reg *next = NULL;
++    if (cb) {
++        next = malloc(sizeof(*next));
++        if (!next)
++            return;     // allocation failed: keep the current registration
++        next->cb = cb;
++        next->user = user;
++    }
++    // The old reg is intentionally NOT freed: feed() may be reading it right now
++    // on the audio pull thread, and there is no join barrier here. set_callback
++    // is called rarely (register once / unregister once), so leaking ~16 bytes
++    // per switch avoids a use-after-free without locking the audio hot path.
++    atomic_exchange(&g_reg, next);
 +}
 +
 +void *iovis_instance_token(struct mpv_handle *handle)
@@ -132,8 +152,8 @@ index 0000000..448b48c
 +    if (!ao || !data || !data[0] || samples <= 0)
 +        return;
 +
-+    iovis_tap_callback cb = atomic_load(&g_cb);
-+    if (!cb) {
++    struct iovis_tap_reg *reg = atomic_load(&g_reg);   // one load -> paired cb+user
++    if (!reg) {
 +#ifdef IOVIS_TAP_LOG
 +        // Opt-in diagnostic only (-Diovis_tap_log=enabled). Throttle to ~one
 +        // line per second of audio so the pipe is observable without a consumer.
@@ -165,14 +185,14 @@ index 0000000..448b48c
 +        .pts_stream = stream_pts,
 +        .opaque     = ao->global,   // per-instance token; matches iovis_instance_token
 +    };
-+    cb(atomic_load(&g_user), &chunk);
++    reg->cb(reg->user, &chunk);     // cb and user are necessarily from the same pair
 +}
 diff --git a/audio/out/iovis_tap.h b/audio/out/iovis_tap.h
 new file mode 100644
-index 0000000..bc7787a
+index 0000000..333cb54
 --- /dev/null
 +++ b/audio/out/iovis_tap.h
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,82 @@
 +/*
 + * iovis PCM tap - non-invasive read-side tap on mpv's audio output path.
 + *
@@ -211,8 +231,12 @@ index 0000000..bc7787a
 +    int format;                 // AF_FORMAT_*
 +    int num_planes;             // planar: == channels; interleaved/packed: 1
 +    const void *const *planes;  // num_planes plane pointers; valid only during the callback
-+    int64_t pts_us;             // device delay: out_time_ns/1000, time until the last
-+                                // sample is audible (NOT a stream timestamp).
++    int64_t pts_us;             // absolute time (mpv monotonic clock, mp_time_ns()/1000)
++                                // at which the last requested sample of this chunk is
++                                // expected to be audible. This is NOT a delay and NOT a
++                                // stream timestamp; subtract mp_time_us() (now) to get
++                                // the remaining device latency. Boundary note: pts_stream
++                                // is the FIRST real sample, pts_us the LAST requested one.
 +    double pts_stream;          // stream-internal PTS in seconds of the first sample in
 +                                // this chunk (same clock as the time-pos property), for
 +                                // subtitle alignment; MP_NOPTS_VALUE (-0x1p+63) if unknown.
@@ -225,6 +249,16 @@ index 0000000..bc7787a
 +
 +// Process-wide, one-shot registration. The callback runs on mpv's audio pull
 +// thread and MUST NOT block (copy out and return). Pass cb=NULL to disable.
++//
++// Lifecycle contract: `user` and `cb` must stay valid for the duration of every
++// in-flight callback. (cb, user) are published atomically as one pair, so a
++// callback always sees the user it was registered with - never a mismatched or
++// NULL user. But this setter does NOT join in-flight callbacks: after
++// set_callback(NULL, NULL) returns, at most one more already-dispatched call
++// (with its own original, self-consistent user) may still be running on the
++// audio pull thread. Before freeing anything `user` points at, the consumer must
++// ensure no callback is in flight (e.g. defer the free, or keep user alive for
++// the player's lifetime).
 +void iovis_tap_set_callback(iovis_tap_callback cb, void *user);
 +
 +// Process-unique token for the mpv instance behind `handle` (its mpv_global*).
@@ -242,18 +276,22 @@ index 0000000..bc7787a
 +
 +#endif
 diff --git a/meson.build b/meson.build
-index fb10be5..fd8e92d 100644
+index fb10be5..ac42544 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -267,6 +267,18 @@ sources = files(
+@@ -267,6 +267,22 @@ sources = files(
      'ta/ta_utils.c',
  )
  
 +# Iovis realtime PCM tap (audio/out). Gated by -Diovis_tap so it can be
 +# compiled out entirely for compliance audit / lean builds; the Apple builder
 +# opts in. Default disabled keeps stock mpv builds unchanged.
++# When enabled, define HAVE_IOVIS_TAP project-wide so the call site in buffer.c
++# is compiled in too. Disabled => the call site and the symbol both vanish, so a
++# stock build links clean (no undefined iovis_tap_feed reference).
 +if get_option('iovis_tap').allowed()
 +    sources += files('audio/out/iovis_tap.c')
++    add_project_arguments('-DHAVE_IOVIS_TAP', language: 'c')
 +    # Opt-in diagnostic log (off in production). Lets the tap print a throttled
 +    # line when no consumer is registered, for pipe debugging only.
 +    if get_option('iovis_tap_log').allowed()
@@ -265,7 +303,7 @@ index fb10be5..fd8e92d 100644
  # compiler stuff
  cc = meson.get_compiler('c')
 diff --git a/meson.options b/meson.options
-index 52782f7..e1e90bc 100644
+index 52782f7..ae1903e 100644
 --- a/meson.options
 +++ b/meson.options
 @@ -39,6 +39,12 @@ option('zimg', type: 'feature', value: 'auto', description: 'libzimg support (hi

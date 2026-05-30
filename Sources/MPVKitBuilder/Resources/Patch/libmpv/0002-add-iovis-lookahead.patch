@@ -1,31 +1,35 @@
 diff --git a/demux/demux.c b/demux/demux.c
-index d1accba..76af764 100644
+index d1accba..824d999 100644
 --- a/demux/demux.c
 +++ b/demux/demux.c
-@@ -28,6 +28,7 @@
+@@ -28,6 +28,9 @@
  #include <sys/types.h>
  
  #include "cache.h"
++#ifdef HAVE_IOVIS_LOOKAHEAD
 +#include "iovis_lookahead.h"
++#endif
  #include "config.h"
  #include "options/m_config.h"
  #include "options/m_option.h"
-@@ -2047,6 +2048,9 @@ static void add_packet_locked(struct sh_stream *stream, demux_packet_t *dp)
+@@ -2047,6 +2050,11 @@ static void add_packet_locked(struct sh_stream *stream, demux_packet_t *dp)
  
      record_packet(in, dp);
  
++#ifdef HAVE_IOVIS_LOOKAHEAD
 +    if (ds->type == STREAM_AUDIO)
 +        iovis_lookahead_feed(stream, dp, in->d_user);
++#endif
 +
      if (in->cache && in->d_user->opts->disk_cache && !dp->is_wrapped_avframe) {
          int64_t pos = demux_cache_write(in->cache, dp);
          if (pos >= 0) {
 diff --git a/demux/iovis_ahead_package.c b/demux/iovis_ahead_package.c
 new file mode 100644
-index 0000000..4f388ed
+index 0000000..a105463
 --- /dev/null
 +++ b/demux/iovis_ahead_package.c
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,64 @@
 +/*
 + * iovis ahead-package-tap (Path D) - see iovis_lookahead.h for the contract.
 + *
@@ -38,6 +42,7 @@ index 0000000..4f388ed
 + */
 +#include <stdatomic.h>
 +#include <stddef.h>
++#include <stdlib.h>
 +
 +#include "iovis_lookahead.h"
 +#include "iovis_lookahead_internal.h"
@@ -45,22 +50,37 @@ index 0000000..4f388ed
 +#include "demux/packet.h"
 +#include "demux/stheader.h"
 +
-+static _Atomic(iovis_la_callback) g_pkt_cb = NULL;
-+static _Atomic(void *) g_pkt_user = NULL;
++// (cb, user) published as one immutable unit so feed never sees a torn pair
++// (old cb + new/NULL user). File-private storage type; not a public symbol.
++struct iovis_la_reg { iovis_la_callback cb; void *user; };
++static _Atomic(struct iovis_la_reg *) g_pkt_reg = NULL;
 +
 +void iovis_lookahead_set_callback(iovis_la_callback cb, void *user)
 +{
-+    atomic_store(&g_pkt_user, user);
-+    atomic_store(&g_pkt_cb, cb);
++    struct iovis_la_reg *next = NULL;
++    if (cb) {
++        next = malloc(sizeof(*next));
++        if (!next)
++            return;     // allocation failed: keep the current registration
++        next->cb = cb;
++        next->user = user;
++    }
++    // The old reg is intentionally NOT freed: feed() may be reading it right now
++    // on the demux thread, and there is no join barrier here. set_callback is
++    // called rarely (register once / unregister once), so leaking ~16 bytes per
++    // switch avoids a use-after-free without locking the demux-locked hot path.
++    atomic_exchange(&g_pkt_reg, next);
 +}
 +
 +void iovis_ahead_package_feed(struct sh_stream *sh, struct demux_packet *dp,
 +                              struct demuxer *demuxer)
 +{
-+    iovis_la_callback cb = atomic_load(&g_pkt_cb);
-+    if (!cb)
++    struct iovis_la_reg *reg = atomic_load(&g_pkt_reg);  // one load -> paired cb+user
++    if (!reg)
 +        return;
-+    struct mp_codec_params *c = sh->codec;
++    // Segmented packets (ordered chapters / EDL) carry their own codec params in
++    // dp->codec; fall back to the stream's codec only when not segmented.
++    struct mp_codec_params *c = (dp->segmented && dp->codec) ? dp->codec : sh->codec;
 +    struct iovis_la_packet pkt = {
 +        .data       = dp->buffer,
 +        .size       = (int)dp->len,
@@ -72,14 +92,14 @@ index 0000000..4f388ed
 +        .channels   = c ? c->channels.num : 0,
 +        .opaque     = demuxer ? demuxer->global : NULL,  // per-instance token
 +    };
-+    cb(atomic_load(&g_pkt_user), &pkt);
++    reg->cb(reg->user, &pkt);   // cb and user are necessarily from the same pair
 +}
 diff --git a/demux/iovis_ahead_pcm.c b/demux/iovis_ahead_pcm.c
 new file mode 100644
-index 0000000..7f8fc37
+index 0000000..c1c590a
 --- /dev/null
 +++ b/demux/iovis_ahead_pcm.c
-@@ -0,0 +1,252 @@
+@@ -0,0 +1,255 @@
 +/*
 + * iovis ahead-pcm-tap (Path A) - FROZEN / harm-reduced. See iovis_lookahead.h.
 + *
@@ -298,7 +318,10 @@ index 0000000..7f8fc37
 +    // bug #1/#2: refresh codec params when the track's codec changes (compare
 +    // codec_id + key params) and bump the generation so the worker rebuilds its
 +    // decoder. Previously g_par was captured once and stuck on the first track.
-+    AVCodecParameters *cp = sh->codec ? sh->codec->lav_codecpar : NULL;
++    // Segmented packets (ordered chapters / EDL) carry their own codec in
++    // dp->codec; fall back to the stream's codec only when not segmented.
++    struct mp_codec_params *sc = (dp->segmented && dp->codec) ? dp->codec : sh->codec;
++    AVCodecParameters *cp = sc ? sc->lav_codecpar : NULL;
 +    if (cp && (!g_par ||
 +               g_par->codec_id != cp->codec_id ||
 +               g_par->sample_rate != cp->sample_rate ||
@@ -334,10 +357,10 @@ index 0000000..7f8fc37
 +}
 diff --git a/demux/iovis_lookahead.c b/demux/iovis_lookahead.c
 new file mode 100644
-index 0000000..8f0b462
+index 0000000..ad0d806
 --- /dev/null
 +++ b/demux/iovis_lookahead.c
-@@ -0,0 +1,30 @@
+@@ -0,0 +1,34 @@
 +/*
 + * iovis look-ahead audio tap - shared demuxer entry. See iovis_lookahead.h for
 + * the public contract.
@@ -363,17 +386,57 @@ index 0000000..8f0b462
 +void iovis_lookahead_feed(struct sh_stream *sh, struct demux_packet *dp,
 +                          struct demuxer *demuxer)
 +{
-+    if (!sh || !dp || dp->is_cached || !dp->buffer || dp->len == 0)
++    // Skip cached packets and wrapped AVFrames: a wrapped-AVFrame packet's buffer
++    // is not a compressed bitstream (it aliases an AVFrame), so Path D would emit a
++    // bogus packet and Path A would feed garbage to avcodec_send_packet. This
++    // matches mpv's own disk-cache exclusion (!dp->is_wrapped_avframe).
++    if (!sh || !dp || dp->is_cached || dp->is_wrapped_avframe || !dp->buffer || dp->len == 0)
 +        return;
 +    iovis_ahead_package_feed(sh, dp, demuxer);
 +    iovis_ahead_pcm_feed(sh, dp, demuxer);
 +}
+diff --git a/demux/iovis_lookahead_internal.h b/demux/iovis_lookahead_internal.h
+new file mode 100644
+index 0000000..b4e86ca
+--- /dev/null
++++ b/demux/iovis_lookahead_internal.h
+@@ -0,0 +1,30 @@
++/*
++ * iovis look-ahead - internal split interface (not a public header).
++ *
++ * The two ahead consumption paths live in separate translation units so the
++ * engineered package path (ahead-package-tap, iovis_ahead_package.c) and the
++ * frozen / harm-reduced PCM path (ahead-pcm-tap, iovis_ahead_pcm.c) can evolve
++ * without touching each other. The shared demuxer entry iovis_lookahead_feed()
++ * in iovis_lookahead.c routes each selected-audio packet to both.
++ *
++ * Each path's feed does its own atomic active-flag early-out, so a path with no
++ * callback registered returns after a single atomic load.
++ */
++#ifndef MP_IOVIS_LOOKAHEAD_INTERNAL_H
++#define MP_IOVIS_LOOKAHEAD_INTERNAL_H
++
++struct sh_stream;
++struct demux_packet;
++struct demuxer;
++
++// ahead-package-tap (Path D): emit compressed packet + codecpar; consumer decodes.
++// `demuxer` supplies the per-instance opaque token (demuxer->global).
++void iovis_ahead_package_feed(struct sh_stream *sh, struct demux_packet *dp,
++                              struct demuxer *demuxer);
++
++// ahead-pcm-tap (Path A, frozen): decode to PCM on a worker thread. `demuxer` is
++// used only for diagnostic logging (queue-full drops); the path carries no opaque.
++void iovis_ahead_pcm_feed(struct sh_stream *sh, struct demux_packet *dp,
++                          struct demuxer *demuxer);
++
++#endif
 diff --git a/demux/iovis_lookahead.h b/demux/iovis_lookahead.h
 new file mode 100644
-index 0000000..ef96c6a
+index 0000000..cd0eaf9
 --- /dev/null
 +++ b/demux/iovis_lookahead.h
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,97 @@
 +/*
 + * iovis look-ahead audio tap (read-side, decode-ahead-of-playback).
 + *
@@ -438,6 +501,17 @@ index 0000000..ef96c6a
 +                                        // demuxers/players (PiP/multi-player).
 +};
 +typedef void (*iovis_la_callback)(void *user, const struct iovis_la_packet *pkt);
++// Process-wide registration. Pass cb=NULL to disable.
++//
++// Lifecycle contract: `user` and `cb` must stay valid for the duration of every
++// in-flight callback. (cb, user) are published atomically as one pair, so a
++// callback always sees the user it was registered with - never a mismatched or
++// NULL user. But this setter does NOT join in-flight callbacks: after
++// set_callback(NULL, NULL) returns, at most one more already-dispatched call
++// (with its own original, self-consistent user) may still be running on the
++// demux thread. Before freeing anything `user` points at, the consumer must
++// ensure no callback is in flight (e.g. defer the free, or keep user alive for
++// the demuxer's lifetime).
 +void iovis_lookahead_set_callback(iovis_la_callback cb, void *user);
 +
 +// ---- Path A: decode in mpv, PCM out ----
@@ -460,47 +534,11 @@ index 0000000..ef96c6a
 +                          struct demuxer *demuxer);
 +
 +#endif
-diff --git a/demux/iovis_lookahead_internal.h b/demux/iovis_lookahead_internal.h
-new file mode 100644
-index 0000000..b4e86ca
---- /dev/null
-+++ b/demux/iovis_lookahead_internal.h
-@@ -0,0 +1,30 @@
-+/*
-+ * iovis look-ahead - internal split interface (not a public header).
-+ *
-+ * The two ahead consumption paths live in separate translation units so the
-+ * engineered package path (ahead-package-tap, iovis_ahead_package.c) and the
-+ * frozen / harm-reduced PCM path (ahead-pcm-tap, iovis_ahead_pcm.c) can evolve
-+ * without touching each other. The shared demuxer entry iovis_lookahead_feed()
-+ * in iovis_lookahead.c routes each selected-audio packet to both.
-+ *
-+ * Each path's feed does its own atomic active-flag early-out, so a path with no
-+ * callback registered returns after a single atomic load.
-+ */
-+#ifndef MP_IOVIS_LOOKAHEAD_INTERNAL_H
-+#define MP_IOVIS_LOOKAHEAD_INTERNAL_H
-+
-+struct sh_stream;
-+struct demux_packet;
-+struct demuxer;
-+
-+// ahead-package-tap (Path D): emit compressed packet + codecpar; consumer decodes.
-+// `demuxer` supplies the per-instance opaque token (demuxer->global).
-+void iovis_ahead_package_feed(struct sh_stream *sh, struct demux_packet *dp,
-+                              struct demuxer *demuxer);
-+
-+// ahead-pcm-tap (Path A, frozen): decode to PCM on a worker thread. `demuxer` is
-+// used only for diagnostic logging (queue-full drops); the path carries no opaque.
-+void iovis_ahead_pcm_feed(struct sh_stream *sh, struct demux_packet *dp,
-+                          struct demuxer *demuxer);
-+
-+#endif
 diff --git a/meson.build b/meson.build
-index fb10be5..00e73cf 100644
+index fb10be5..ac42544 100644
 --- a/meson.build
 +++ b/meson.build
-@@ -579,6 +579,16 @@ features += {'vector': cc.has_function_attribute('vector_size', required: get_op
+@@ -579,6 +579,20 @@ features += {'vector': cc.has_function_attribute('vector_size', required: get_op
  
  sources += path_source + timer_source
  
@@ -508,17 +546,21 @@ index fb10be5..00e73cf 100644
 +# (ahead-package-tap, ahead-pcm-tap) compile as one feature gated by
 +# -Diovis_lookahead so the whole tap can be compiled out for compliance audit /
 +# lean builds; the Apple builder opts in. Default disabled keeps stock builds clean.
++# When enabled, define HAVE_IOVIS_LOOKAHEAD project-wide so the call site in
++# demux.c is compiled in too. Disabled => the call site and the symbols both
++# vanish, so a stock build links clean (no undefined iovis_lookahead_feed).
 +if get_option('iovis_lookahead').allowed()
 +    sources += files('demux/iovis_lookahead.c',
 +                     'demux/iovis_ahead_package.c',
 +                     'demux/iovis_ahead_pcm.c')
++    add_project_arguments('-DHAVE_IOVIS_LOOKAHEAD', language: 'c')
 +endif
 +
  
  # various file generations
  tools_directory = join_paths(source_root, 'TOOLS')
 diff --git a/meson.options b/meson.options
-index 52782f7..a50fcb4 100644
+index 52782f7..ae1903e 100644
 --- a/meson.options
 +++ b/meson.options
 @@ -19,6 +19,9 @@ option('lcms2', type: 'feature', value: 'auto', description: 'LCMS2 support')
