@@ -392,7 +392,7 @@
           "id": "c5-ahead-split",
           "title": "ahead 两路径文件 / 符号拆分",
           "desc": "把 ahead-package-tap 与 ahead-pcm-tap 从同一 iovis_lookahead.{h,c} 拆到独立编译单元，feed 入口对两路径用独立 active 标志短路，使工程化与无害化互不误伤。",
-          "status": "planned",
+          "status": "done",
           "deps": [
             "f1-disposition-decision"
           ],
@@ -424,7 +424,8 @@
             {
               "title": "证据缺口",
               "items": [
-                "是否同步把 C 符号改成与代号一致（iovis_ahead_package_* / iovis_ahead_pcm_*），需与桥接侧改名成本权衡后决策。"
+                "已决策：对外 C 符号不改名，保持 iovis_lookahead_set_callback（package）/ iovis_lookahead_set_pcm_callback（pcm）/ iovis_lookahead_feed。理由：改名属对外契约变动（撞验收边界），会破坏 c3-symbol-verify 已定符号口径并迫使桥接侧改动；代号↔代码映射改由内部符号 iovis_ahead_package_feed / iovis_ahead_pcm_feed 承担，对外零成本。",
+                "已闭合 c2 遗留缺口：拆分后两路径仍共用单一 -Diovis_lookahead 开关编入三文件，不拆独立 pcm 开关（避免入口条件编译；libavcodec 本就是 mpv 依赖，单独剔除 pcm 的合规收益有限）。后续若需编译期独立剔除 pcm，可再加 -Diovis_lookahead_pcm + 入口条件编译，本轮不做。"
               ]
             },
             {
@@ -436,11 +437,22 @@
             },
             {
               "title": "交付物",
-              "items": []
+              "items": [
+                "文件拆分（0002 补丁）：iovis_lookahead.c 从 256 行瘦身为 29 行纯入口（共享 guard + 调两路径 feed）；新增 demux/iovis_ahead_package.c（45 行，Path D，含 iovis_lookahead_set_callback + iovis_ahead_package_feed）、demux/iovis_ahead_pcm.c（217 行，Path A 冻结，全部 pcm 状态/worker/setter + iovis_ahead_pcm_feed）。",
+                "内部头（0002 补丁）：新增 demux/iovis_lookahead_internal.h（25 行，仅声明 iovis_ahead_package_feed / iovis_ahead_pcm_feed），入口与两单元 include 之；不进公开头（patchPublicHeaders 仍只含 iovis_lookahead.h，无需改）。",
+                "公开头 iovis_lookahead.h 与对外符号集完全不变；消费侧零改动。",
+                "入口短路：iovis_lookahead_feed 做一次 guard 后调两路径 feed，各 feed 首行各自 atomic 早退（package: atomic_load(g_pkt_cb) 判空；pcm: atomic_load(g_pcm_active)），未注册任一回调即单 atomic 早退。",
+                "meson gate（0002 补丁）：-Diovis_lookahead 块改为编入三个文件；iovis_ahead_pcm.c 顶部注释标注『冻结，仅修 bug，勿增功能』。"
+              ]
             },
             {
               "title": "任务总结",
-              "items": []
+              "items": [
+                "两路径已落到独立编译单元，改 package（a2/a3）只动 iovis_ahead_package.c、冻结 pcm（h1/h2）只动 iovis_ahead_pcm.c，互不误伤；入口 iovis_lookahead.c 稳定。",
+                "对外符号与公开头零变化，消费侧无需改动；代号映射靠内部符号体现。",
+                "隔离验证：内部头 + 入口 dispatch 签名 clang -fsyntax-only 通过；符号分布核对（三对外符号各唯一、无旧 static 残留）；三补丁顺序 git apply 干净（0001→0002→0003）。",
+                "运行期短路零影响实测归 v1-zero-impact-verify，符号导出校验归 c3-symbol-verify（构建后）。"
+              ]
             }
           ]
         }
