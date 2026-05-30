@@ -20,7 +20,8 @@
       "Bash(node 需求/validate-spec-tasks.js 音频Tap工程化需求/音频Tap工程化-spec-tasks.json)",
       "Bash(git -C build/libmpv-source-v0.41.0 status --short)",
       "Bash(git -c core.quotepath=false status --short --untracked-files=all)",
-      "Bash(git check-ignore *)"
+      "Bash(git check-ignore *)",
+      "Bash(node \"Sources/MPVKitBuilder/Docs/需求/validate-spec-tasks.js\" \"Sources/MPVKitBuilder/Docs/音频Tap工程化需求/音频Tap工程化-spec-tasks.json\")"
     ]
   }
 }

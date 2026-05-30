@@ -191,13 +191,13 @@
     },
     {
       "num": 2,
-      "title": "共性工程化基础",
+      "title": "共性工程化基础 · 代码修改",
       "tasks": [
         {
           "id": "c1-public-headers",
           "title": "公开头打包：消除手抄 ABI 风险",
-          "desc": "把 iovis_tap.h / iovis_lookahead.h 随 xcframework 装出公开头或独立 modulemap，使消费侧 import Libmpv 直接拿到声明，删除手抄桥接。",
-          "status": "planned",
+          "desc": "把 iovis_tap.h / iovis_lookahead.h 随 xcframework 装出公开头，使消费侧 import Libmpv 直接拿到声明，删除手抄桥接。代码修改已完成，产物级验证留待统一构建后。",
+          "status": "done",
           "deps": [
             "f1-disposition-decision"
           ],
@@ -208,7 +208,8 @@
               "items": [
                 "两个头文件在 mpv 源码 audio/out/ 与 demux/，补丁未将其装入公开头；LibMpvBuilder.headerRoot() 现指向 include/mpv。",
                 "IovisPCMTapPatch.md §5.2：消费侧 IovisTapBridge 手抄声明，布局漂移会静默读错内存。",
-                "方案文档第七节 7.1 指出落点为 LibMpvBuilder.headerRoot() / XCFramework 打包逻辑。"
+                "方案文档第七节 7.1 指出落点为 LibMpvBuilder.headerRoot() / XCFramework 打包逻辑。",
+                "已实现：commit 7499acd 在 LibMpvBuilder.swift 新增 installPatchPublicHeaders(platform:arch:)，在 meson install 后把 audio/out/iovis_tap.h、demux/iovis_lookahead.h 复制进公开头目录；补丁未应用时 skip。"
               ]
             },
             {
@@ -221,29 +222,37 @@
             {
               "title": "验证",
               "items": [
-                "出包后产物 include 路径下存在 iovis_tap.h / iovis_lookahead.h（或对应 modulemap 暴露）。",
-                "消费侧示例工程 import Libmpv 后可直接引用 iovis_* 声明，移除 IovisTapBridge 手抄结构仍编译通过。"
+                "代码期自检：LibMpvBuilder.swift 单文件诊断无报错，installPatchPublicHeaders 在 build 流程内被调用、patchPublicHeaders 列表含两个目标头。",
+                "代码期自检：补丁未应用分支走 skip 日志、不抛错（逻辑核对）。",
+                "产物级验证（出包后 include 路径存在头、消费侧 import Libmpv 移除手抄结构仍编译）→ 见 cv-headers-verify（构建后执行）。"
               ]
             },
             {
               "title": "证据缺口",
               "items": [
-                "两个头是否放进 include/mpv 同名空间、还是独立子目录/modulemap，需结合现有打包结构确定最终落点。"
+                "两个头放进 include/mpv 同名空间、还是独立子目录/modulemap，最终落点已按现有打包结构定为复制进公开头目录，构建后由 cv-headers-verify 确认实际可见路径。"
               ]
             },
             {
               "title": "验收边界",
               "items": [
-                "只覆盖头文件打包与消费侧可直接 import；不含字段结构变更（属各路径工程化任务）。"
+                "只覆盖头文件打包代码改动；不含字段结构变更（属各路径工程化任务）。",
+                "产物级验证归 cv-headers-verify，本任务不含构建。"
               ]
             },
             {
               "title": "交付物",
-              "items": []
+              "items": [
+                "LibMpvBuilder.swift 新增 installPatchPublicHeaders(platform:arch:) 与 patchPublicHeaders 列表（commit 7499acd）。",
+                "build 流程在 meson install 后调用该方法，把 iovis_tap.h / iovis_lookahead.h 复制进公开头目录。"
+              ]
             },
             {
               "title": "任务总结",
-              "items": []
+              "items": [
+                "公开头安装代码已落地，消费侧后续可 import Libmpv 直接取声明、删手抄桥接。",
+                "实际产物可见性与消费侧编译通过性留待 cv-headers-verify 在单次构建后确认。"
+              ]
             }
           ]
         },
@@ -269,15 +278,15 @@
               "title": "基于事实的演绎推理",
               "items": [
                 "因为目前无编译开关、能力只能靠运行时回调关闭，所以加 meson 开关可在编译期彻底关闭，满足合规审计与精简产物的需要。",
-                "因为开关决定符号是否编入，所以符号校验任务依赖本任务。"
+                "因为开关决定符号是否编入，所以符号校验任务依赖本任务的产物。"
               ]
             },
             {
               "title": "验证",
               "items": [
-                "-Diovis_tap=disabled 出包后 nm 查不到 iovis_tap_* 符号；enabled 时可查到。",
-                "-Diovis_lookahead 对 ahead 两路径同理。",
-                "meson 配置阶段不因开关组合硬失败（仿 gpuOptions 的 gate 风格）。"
+                "代码期自检：meson option 定义语法正确、补丁内 sources 改为按 option gate（git apply --check 通过）。",
+                "代码期自检：LibMpvBuilder appleOptions() 追加开关后单文件诊断无报错，配置阶段不因开关组合硬失败（仿 gpuOptions 的 gate 风格，源码逻辑核对）。",
+                "产物级验证（disabled 出包 nm 查不到 iovis_* 符号、enabled 可查到）→ 见 c3-symbol-verify（构建后执行）。"
               ]
             },
             {
@@ -289,57 +298,8 @@
             {
               "title": "验收边界",
               "items": [
-                "只覆盖编译开关与构建参数；不改回调运行时语义。"
-              ]
-            },
-            {
-              "title": "交付物",
-              "items": []
-            },
-            {
-              "title": "任务总结",
-              "items": []
-            }
-          ]
-        },
-        {
-          "id": "c3-symbol-verify",
-          "title": "符号导出校验流程",
-          "desc": "建立出包后 nm 校验流程，确认开关 enabled 时三组回调符号在目标 slice，防 LTO / dead-strip 误删。",
-          "status": "planned",
-          "deps": [
-            "c2-meson-gate"
-          ],
-          "completedAt": "",
-          "details": [
-            {
-              "title": "事实",
-              "items": [
-                "IovisPCMTapPatch.md §4 给出 nm dist/Libmpv.xcframework/<slice>/Libmpv.framework/Libmpv | grep iovis_tap 校验范式与 force=libmpv 重编要求。",
-                "方案文档第七节 7.3 列出期望符号 T _iovis_tap_set_callback / T _iovis_lookahead_set_callback / T _iovis_lookahead_set_pcm_callback。"
-              ]
-            },
-            {
-              "title": "基于事实的演绎推理",
-              "items": [
-                "因为静态库可能被 LTO / dead-strip 裁掉未被内部引用的导出符号，所以必须有可重复的 nm 校验门，否则消费侧链接期才发现缺符号。"
-              ]
-            },
-            {
-              "title": "验证",
-              "items": [
-                "对每个目标 slice 跑 nm，三组 set_callback 符号均为已定义（T）。",
-                "校验步骤可写成脚本/文档命令，CI 可复用。"
-              ]
-            },
-            {
-              "title": "证据缺口",
-              "items": []
-            },
-            {
-              "title": "验收边界",
-              "items": [
-                "只覆盖符号存在性校验，不含功能行为验证（属 Phase 6）。"
+                "只覆盖编译开关与构建参数代码改动；不改回调运行时语义。",
+                "开关对符号入包的产物级影响归 c3-symbol-verify。"
               ]
             },
             {
@@ -381,8 +341,9 @@
             {
               "title": "验证",
               "items": [
-                "两个 player 实例同时注册时，回调能按 opaque 区分来源。",
-                "opaque 字段加入后公开头与消费侧声明同步、ABI 偏移自洽。"
+                "代码期自检：chunk 增 void *opaque 后公开头与消费侧声明同步、ABI 偏移自洽（源码核对）。",
+                "代码期自检：mpv user-data 注入路径在 AO 层与 demux 层的调用点已核实存在（XcodeGrep / mpv API 核对）。",
+                "产物级/运行期验证（两 player 实例同时注册按 opaque 区分来源）→ 见 cv-opaque-verify（构建后执行）。"
               ]
             },
             {
@@ -394,7 +355,8 @@
             {
               "title": "验收边界",
               "items": [
-                "只覆盖 realtime 与 package 的 opaque 设计与注入；不触碰 ahead-pcm-tap。"
+                "只覆盖 realtime 与 package 的 opaque 设计与注入代码；不触碰 ahead-pcm-tap。",
+                "多实例运行期验证归 cv-opaque-verify。"
               ]
             },
             {
@@ -434,9 +396,10 @@
             {
               "title": "验证",
               "items": [
-                "拆分后两路径分属不同源文件，修改一条不触碰另一条的源文件。",
-                "未注册任一回调时，feed 入口只剩必要 atomic 检查即早退。",
-                "拆分补丁可干净 git apply --check，与 0001 共存。"
+                "代码期自检：拆分后两路径分属不同源文件，修改一条不触碰另一条的源文件（文件结构核对）。",
+                "代码期自检：拆分补丁可干净 git apply --check，与 0001 共存。",
+                "代码期自检：未注册任一回调时 feed 入口只剩必要 atomic 检查即早退（源码逻辑核对）。",
+                "产物级/运行期短路零影响验证 → 归 v1-zero-impact-verify（构建后执行）。"
               ]
             },
             {
@@ -448,7 +411,8 @@
             {
               "title": "验收边界",
               "items": [
-                "只做文件/编译单元拆分与入口短路；不改各路径对外回调契约语义（语义改动在 a*/h*）。"
+                "只做文件/编译单元拆分与入口短路代码；不改各路径对外回调契约语义（语义改动在 a*/h*）。",
+                "运行期短路零影响验证归 v1-zero-impact-verify。"
               ]
             },
             {
@@ -465,7 +429,7 @@
     },
     {
       "num": 3,
-      "title": "realtime-pcm-tap 工程化",
+      "title": "realtime-pcm-tap 工程化 · 代码修改",
       "tasks": [
         {
           "id": "r1-zero-impact",
@@ -493,8 +457,9 @@
             {
               "title": "验证",
               "items": [
-                "不注册回调播放一段，日志中无 [iovis_tap] 行。",
-                "未启用路径仅一次 atomic_load 比较即返回。"
+                "代码期自检：无回调分支移除 atomic_fetch_add 累加与 MP_INFO，仅余一次 atomic_load 比较即返回（源码逻辑核对）。",
+                "代码期自检：诊断日志改由 meson 开关 gate，默认关闭（与 c2 开关对齐核对）。",
+                "运行期验证（不注册回调播放、日志无 iovis_tap 行）→ 归 v1-zero-impact-verify（构建后执行）。"
               ]
             },
             {
@@ -504,7 +469,8 @@
             {
               "title": "验收边界",
               "items": [
-                "只改无回调分支的日志/累加；不动有回调的数据通路。"
+                "只改无回调分支的日志/累加代码；不动有回调的数据通路。",
+                "未启用零影响运行期实测归 v1-zero-impact-verify。"
               ]
             },
             {
@@ -548,9 +514,9 @@
             {
               "title": "验证",
               "items": [
-                "planar 流下消费侧能取到全部声道平面而非仅 plane0。",
-                "interleaved 流下 data[0] 全声道解读正确。",
-                "音频拉取线程内仍无重采样/下混等 DSP 调用。"
+                "代码期自检：chunk 增 num_planes + 多平面指针（或固定上限平面数组）后公开头与消费侧声明同步（源码核对）。",
+                "代码期自检：音频拉取线程内无重采样/下混等 DSP 调用（源码逻辑核对）。",
+                "运行期验证（planar 流消费侧取到全部平面、interleaved 流 data[0] 全声道解读正确）→ 归 v2-engineering-verify（构建后执行）。"
               ]
             },
             {
@@ -562,7 +528,8 @@
             {
               "title": "验收边界",
               "items": [
-                "只覆盖补丁侧忠实暴露与格式元数据；消费侧 dispatch/转换在 r4。"
+                "只覆盖补丁侧忠实暴露与格式元数据代码；消费侧 dispatch/转换在 r4。",
+                "运行期全平面验证归 v2-engineering-verify。"
               ]
             },
             {
@@ -601,8 +568,8 @@
             {
               "title": "验证",
               "items": [
-                "chunk 暴露流内 PTS 字段，与 time-pos 在稳态播放下吻合（误差量化）。",
-                "保留设备延迟字段供延迟补偿。"
+                "代码期自检：chunk 新增流内 PTS 字段、保留设备延迟字段，AO 层换算流内 PTS 的 mpv API 已核实存在（源码/文档核对）。",
+                "运行期验证（流内 PTS 与 time-pos 稳态吻合、误差量化，含暂停/变速/seek 后）→ 归 v2-engineering-verify（构建后执行）。"
               ]
             },
             {
@@ -614,7 +581,8 @@
             {
               "title": "验收边界",
               "items": [
-                "只覆盖时间戳字段与口径；字幕侧对齐重锚逻辑属上层（字幕策略文档）。"
+                "只覆盖时间戳字段与口径代码；字幕侧对齐重锚逻辑属上层（字幕策略文档）。",
+                "时间戳吻合度运行期实测归 v2-engineering-verify。"
               ]
             },
             {
@@ -656,9 +624,9 @@
             {
               "title": "验证",
               "items": [
-                "源格式按 chunk.samplerate/format/channels 动态建立，覆盖 floatp 等实际格式。",
-                "stereo 流经 converter 下混为 mono，转录可用；不再丢右声道。",
-                "48000 等非 44100 采样率不再因写死而出错。"
+                "代码期自检：消费侧源格式按 chunk.samplerate/format/channels 动态建立（移除写死 44100），单文件诊断无报错。",
+                "代码期自检：AVAudioConverter 下混 stereo→mono + 重采样链路按 §6.2 范式实现（源码核对）。",
+                "运行期验证（floatp 等实际格式、48000 等非 44100、stereo 下混转录可用、不丢右声道）→ 归 v2-engineering-verify（构建后执行）。"
               ]
             },
             {
@@ -668,7 +636,8 @@
             {
               "title": "验收边界",
               "items": [
-                "只覆盖消费侧格式映射与转换；不含 ring buffer/背压（属上层管线优化）与字幕显示。"
+                "只覆盖消费侧格式映射与转换代码；不含 ring buffer/背压（属上层管线优化）与字幕显示。",
+                "转换正确性运行期实测归 v2-engineering-verify。"
               ]
             },
             {
@@ -685,7 +654,7 @@
     },
     {
       "num": 4,
-      "title": "ahead-package-tap 工程化",
+      "title": "ahead-package-tap 工程化 · 代码修改",
       "tasks": [
         {
           "id": "a1-lock-contract",
@@ -714,9 +683,9 @@
             {
               "title": "验证",
               "items": [
-                "公开头注释明确持锁/禁阻塞/禁重入约束。",
-                "消费侧范式：回调内仅 memcpy 压缩字节 + 拷 codecpar 摘要入队即返回；解码在队列另一端进行。",
-                "压力播放下 demux 缓冲水位无异常下跌。"
+                "代码期自检：公开头注释明确持锁/禁阻塞/禁重入约束（源码核对）。",
+                "代码期自检：消费侧范式实现为回调内仅 memcpy 压缩字节 + 拷 codecpar 摘要入队即返回、解码在队列另一端（源码逻辑核对）。",
+                "运行期验证（压力播放下 demux 缓冲水位无异常下跌）→ 归 v2-engineering-verify（构建后执行）。"
               ]
             },
             {
@@ -726,7 +695,8 @@
             {
               "title": "验收边界",
               "items": [
-                "只覆盖契约文档化与消费侧范式；不含 mpv 侧解码（明确不做）。"
+                "只覆盖契约文档化与消费侧范式代码；不含 mpv 侧解码（明确不做）。",
+                "demux 水位运行期实测归 v2-engineering-verify。"
               ]
             },
             {
@@ -766,8 +736,8 @@
             {
               "title": "验证",
               "items": [
-                "多实例下消费侧按 packet.opaque 区分来源。",
-                "字段加入后公开头与桥接声明同步。"
+                "代码期自检：iovis_la_packet 增 opaque 字段后公开头与桥接声明同步（源码核对）。",
+                "运行期验证（多实例下消费侧按 packet.opaque 区分来源）→ 归 cv-opaque-verify（构建后执行）。"
               ]
             },
             {
@@ -777,7 +747,8 @@
             {
               "title": "验收边界",
               "items": [
-                "只覆盖 package 路径的 opaque 落地。"
+                "只覆盖 package 路径的 opaque 落地代码。",
+                "多实例运行期验证归 cv-opaque-verify。"
               ]
             },
             {
@@ -816,8 +787,9 @@
             {
               "title": "验证",
               "items": [
-                "切音轨后消费侧检测到 codecpar 变化并重建解码器，解码不出错。",
-                "消费侧对 codecpar 做即用即读或 avcodec_parameters_copy，无悬挂引用。"
+                "代码期自检：消费侧对 codecpar 做即用即读或 avcodec_parameters_copy、无悬挂引用（源码逻辑核对）。",
+                "代码期自检：消费侧检测 codecpar 变化并触发重建解码器的逻辑已实现（源码核对）。",
+                "运行期验证（切音轨后消费侧重建解码器、解码不出错）→ 归 v2-engineering-verify（构建后执行）。"
               ]
             },
             {
@@ -827,7 +799,8 @@
             {
               "title": "验收边界",
               "items": [
-                "只覆盖 package 路径切轨；不改 mpv 侧（无状态）。"
+                "只覆盖 package 路径切轨消费侧代码；不改 mpv 侧（无状态）。",
+                "切轨运行期实测归 v2-engineering-verify。"
               ]
             },
             {
@@ -844,7 +817,7 @@
     },
     {
       "num": 5,
-      "title": "ahead-pcm-tap 无害化",
+      "title": "ahead-pcm-tap 无害化 · 代码修改",
       "tasks": [
         {
           "id": "h1-bug-decoder-ctx",
@@ -873,8 +846,8 @@
             {
               "title": "验证",
               "items": [
-                "切音轨（codec 变化）后注册 pcm 回调仍能正确解出 PCM。",
-                "PCM 输出结构 iovis_la_pcm 字段不变（不扩接口）。"
+                "代码期自检：g_par 变化时重建 ctx 的逻辑已实现、PCM 输出结构 iovis_la_pcm 字段不变（源码核对，不扩接口）。",
+                "运行期验证（切音轨 codec 变化后注册 pcm 回调仍正确解出 PCM）→ 归 h3-noop-regression（构建后执行）。"
               ]
             },
             {
@@ -884,7 +857,8 @@
             {
               "title": "验收边界",
               "items": [
-                "只修 ctx/g_par 刷新；不做 planar 全平面、不做多实例、不改队列容量。"
+                "只修 ctx/g_par 刷新代码；不做 planar 全平面、不做多实例、不改队列容量。",
+                "切轨解码正确性运行期实测归 h3-noop-regression。"
               ]
             },
             {
@@ -924,8 +898,9 @@
             {
               "title": "验证",
               "items": [
-                "解码器初始化失败后不再每包重试。",
-                "队列满时有可观察的丢包计数/节流日志，no-op 语义与队列容量不变。"
+                "代码期自检：open2 失败后置一次性失败标记、不再每包重试（源码逻辑核对）。",
+                "代码期自检：队列满丢包加计数/节流日志，no-op 语义与队列容量(1024)不变（源码核对）。",
+                "运行期验证（失败不再每包重试、队列满有可观察丢包计数/节流日志）→ 归 h3-noop-regression（构建后执行）。"
               ]
             },
             {
@@ -935,60 +910,8 @@
             {
               "title": "验收边界",
               "items": [
-                "只修 #3/#4；不增背压策略、不改容量、不扩接口。"
-              ]
-            },
-            {
-              "title": "交付物",
-              "items": []
-            },
-            {
-              "title": "任务总结",
-              "items": []
-            }
-          ]
-        },
-        {
-          "id": "h3-noop-regression",
-          "title": "no-op 与接口冻结回归",
-          "desc": "守住未注册回调时严格 no-op、接口/字段/线程模型/队列容量不变，作为无害化收口的回归门。",
-          "status": "planned",
-          "deps": [
-            "h1-bug-decoder-ctx",
-            "h2-bug-retry-drop"
-          ],
-          "completedAt": "",
-          "details": [
-            {
-              "title": "事实",
-              "items": [
-                "feed_pcm_path 首行 atomic_load(&g_pcm_active) 早退即 no-op（0002 补丁第 240-241 行）。",
-                "方案文档第六节 6.3 复核结论：disable 时序 broadcast→join→free_queue→free(g_par) 正确，无 use-after-free/double-free，无害化时勿动。",
-                "无害化口径：接口、字段、线程模型、队列容量维持不变。"
-              ]
-            },
-            {
-              "title": "基于事实的演绎推理",
-              "items": [
-                "因为无害化的核心承诺是『不增功能、未注册 no-op』，所以收口须有回归门确认 h1/h2 修复未破坏 no-op 语义与既有正确的生命周期时序。"
-              ]
-            },
-            {
-              "title": "验证",
-              "items": [
-                "不注册 pcm 回调时无队列/无线程活动、无日志、无分配。",
-                "enable/disable 反复切换无线程泄漏、无崩溃（沿用既有正确时序）。",
-                "iovis_la_pcm 接口与队列容量与冻结前一致。"
-              ]
-            },
-            {
-              "title": "证据缺口",
-              "items": []
-            },
-            {
-              "title": "验收边界",
-              "items": [
-                "只做无害化回归确认；不引入任何新能力。"
+                "只修 #3/#4 代码；不增背压策略、不改容量、不扩接口。",
+                "运行期可观察性实测归 h3-noop-regression。"
               ]
             },
             {
@@ -1005,17 +928,247 @@
     },
     {
       "num": 6,
-      "title": "验证与回归",
+      "title": "构建闸门（单次出包）",
       "tasks": [
+        {
+          "id": "b1-single-build",
+          "title": "应用全部补丁后单次构建出包",
+          "desc": "在 Phase 2-5 所有代码/补丁修改完成后，应用全部补丁、force=libmpv 重编、产出 Libmpv.xcframework。这是整轮唯一构建点，构建后验证统一在 Phase 7 进行。",
+          "status": "planned",
+          "deps": [
+            "c1-public-headers",
+            "c2-meson-gate",
+            "c4-opaque-multiinstance",
+            "c5-ahead-split",
+            "r1-zero-impact",
+            "r2-channel-format",
+            "r3-timestamp",
+            "r4-consumer-dispatch",
+            "a1-lock-contract",
+            "a2-package-opaque",
+            "a3-track-switch",
+            "h1-bug-decoder-ctx",
+            "h2-bug-retry-drop"
+          ],
+          "completedAt": "",
+          "details": [
+            {
+              "title": "事实",
+              "items": [
+                "IovisPCMTapPatch.md §4 要求改 libmpv 源码/补丁后须 force=libmpv 重编才进产物。",
+                "全部工程化/无害化修改分散在补丁（iovis_tap.{h,c} / iovis_lookahead 拆分文件 / meson.build / 公开头安装）与消费侧 IovisKit Swift 代码。",
+                "用户约束：构建耗时长，要求所有修改完成后只构建一次，再统一验证。"
+              ]
+            },
+            {
+              "title": "基于事实的演绎推理",
+              "items": [
+                "因为单次构建很贵，把它设为显式闸门、deps 收口所有修改任务，能避免每改一点就触发一次构建。",
+                "因为所有产物级/运行期验证都消费同一份产物，所以构建闸门必须在全部代码修改 done 之后、全部验证任务之前。"
+              ]
+            },
+            {
+              "title": "验证",
+              "items": [
+                "全部补丁 git apply 干净、无 reject。",
+                "force=libmpv 重编成功产出 dist/Libmpv.xcframework，无编译/链接错误。",
+                "构建日志显示 installPatchPublicHeaders 对各 slice 执行了公开头安装。"
+              ]
+            },
+            {
+              "title": "证据缺口",
+              "items": [
+                "本轮需要出包的目标 slice 范围（仅 iOS/含 tvOS 等）以届时验证需求为准。"
+              ]
+            },
+            {
+              "title": "验收边界",
+              "items": [
+                "只覆盖一次成功出包；任何符号/行为/产物级断言均不在本任务，归 Phase 7。",
+                "若构建暴露代码缺陷，回到对应 Phase 2-5 修改任务修复后再次过闸。"
+              ]
+            },
+            {
+              "title": "交付物",
+              "items": []
+            },
+            {
+              "title": "任务总结",
+              "items": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "num": 7,
+      "title": "构建后统一验证与回归",
+      "tasks": [
+        {
+          "id": "cv-headers-verify",
+          "title": "公开头产物级验证（c1）",
+          "desc": "出包后确认 iovis_tap.h / iovis_lookahead.h 在产物 include 路径可见，消费侧 import Libmpv 删除手抄结构后仍编译通过。",
+          "status": "planned",
+          "deps": [
+            "b1-single-build"
+          ],
+          "completedAt": "",
+          "details": [
+            {
+              "title": "事实",
+              "items": [
+                "c1-public-headers 已实现 installPatchPublicHeaders（commit 7499acd），代码层已完成但未出包验证。",
+                "IovisPCMTapPatch.md §5.2：消费侧 IovisTapBridge 手抄声明，公开头到位后应可删除。"
+              ]
+            },
+            {
+              "title": "基于事实的演绎推理",
+              "items": [
+                "因为公开头安装只有在实际出包后才能确认产物 include 路径与消费侧可 import，所以该验证必须在构建闸门之后执行。"
+              ]
+            },
+            {
+              "title": "验证",
+              "items": [
+                "出包产物 include 路径下存在 iovis_tap.h / iovis_lookahead.h。",
+                "消费侧示例工程 import Libmpv 后直接引用 iovis_* 声明、移除 IovisTapBridge 手抄结构仍编译通过。"
+              ]
+            },
+            {
+              "title": "证据缺口",
+              "items": []
+            },
+            {
+              "title": "验收边界",
+              "items": [
+                "只验证头可见性与消费侧可 import；字段结构正确性随对应路径在 v2 验证。"
+              ]
+            },
+            {
+              "title": "交付物",
+              "items": []
+            },
+            {
+              "title": "任务总结",
+              "items": []
+            }
+          ]
+        },
+        {
+          "id": "c3-symbol-verify",
+          "title": "符号导出与开关校验（c2 + 三组回调符号）",
+          "desc": "出包后用 nm 校验：开关 enabled 时三组 set_callback 符号在目标 slice 为已定义（T），disabled 时查不到对应符号，防 LTO / dead-strip 误删。",
+          "status": "planned",
+          "deps": [
+            "b1-single-build"
+          ],
+          "completedAt": "",
+          "details": [
+            {
+              "title": "事实",
+              "items": [
+                "IovisPCMTapPatch.md §4 给出 nm dist/Libmpv.xcframework/<slice>/Libmpv.framework/Libmpv | grep iovis_tap 校验范式与 force=libmpv 重编要求。",
+                "方案文档第七节 7.3 列出期望符号 T _iovis_tap_set_callback / T _iovis_lookahead_set_callback / T _iovis_lookahead_set_pcm_callback。",
+                "c2-meson-gate 提供 -Diovis_tap / -Diovis_lookahead 开关，决定符号是否编入。"
+              ]
+            },
+            {
+              "title": "基于事实的演绎推理",
+              "items": [
+                "因为静态库可能被 LTO / dead-strip 裁掉未被内部引用的导出符号，所以必须有可重复的 nm 校验门，否则消费侧链接期才发现缺符号。",
+                "因为 c2 开关决定符号入包与否，所以开关 enabled/disabled 两态的符号存在性一并在此校验。"
+              ]
+            },
+            {
+              "title": "验证",
+              "items": [
+                "enabled 出包：每个目标 slice 跑 nm，三组 set_callback 符号均为已定义（T）。",
+                "disabled 出包：nm 查不到对应 iovis_* 符号。",
+                "校验步骤写成脚本/文档命令，CI 可复用。"
+              ]
+            },
+            {
+              "title": "证据缺口",
+              "items": []
+            },
+            {
+              "title": "验收边界",
+              "items": [
+                "只覆盖符号存在性与开关入包校验，不含功能行为验证（属 v1/v2/h3）。"
+              ]
+            },
+            {
+              "title": "交付物",
+              "items": []
+            },
+            {
+              "title": "任务总结",
+              "items": []
+            }
+          ]
+        },
+        {
+          "id": "cv-opaque-verify",
+          "title": "多实例 opaque 运行期验证（c4 + a2）",
+          "desc": "出包后用两个 mpv/player 实例同时注册回调，验证 realtime chunk 与 package packet 能按 opaque 区分来源、互不串台。",
+          "status": "planned",
+          "deps": [
+            "b1-single-build",
+            "cv-headers-verify"
+          ],
+          "completedAt": "",
+          "details": [
+            {
+              "title": "事实",
+              "items": [
+                "c4-opaque-multiinstance 在 realtime chunk 加 opaque、a2-package-opaque 在 iovis_la_packet 加 opaque，经 mpv user-data 注入。",
+                "IovisPCMTapPatch.md §8.A.6：PiP/多 player 需 opaque 区分实例。"
+              ]
+            },
+            {
+              "title": "基于事实的演绎推理",
+              "items": [
+                "因为单槽回调多实例串台只有在真机多 player 场景下才暴露，所以 opaque 区分能力须在出包后做运行期验证。"
+              ]
+            },
+            {
+              "title": "验证",
+              "items": [
+                "两个 player 实例同时注册：realtime 回调按 chunk.opaque 区分来源。",
+                "两个 demuxer/player 同时注册：package 回调按 packet.opaque 区分来源。",
+                "opaque 字段 ABI 偏移与消费侧声明自洽，无错位。"
+              ]
+            },
+            {
+              "title": "证据缺口",
+              "items": [
+                "真机多 player / PiP 场景是否在本轮可复现，取决于届时设备与用例。"
+              ]
+            },
+            {
+              "title": "验收边界",
+              "items": [
+                "只覆盖 realtime + package 的 opaque 多实例区分；ahead-pcm-tap 不含 opaque（无害化不做）。"
+              ]
+            },
+            {
+              "title": "交付物",
+              "items": []
+            },
+            {
+              "title": "任务总结",
+              "items": []
+            }
+          ]
+        },
         {
           "id": "v1-zero-impact-verify",
           "title": "未启用零影响实测",
-          "desc": "三条路径都不注册回调时，验证无 iovis 日志、无可测 CPU 增量，编译开关 disabled 时符号不入产物。",
+          "desc": "三条路径都不注册回调时，验证无 iovis 日志、无可测 CPU 增量；编译开关 disabled 时 feed 入口短路、符号不入产物。",
           "status": "planned",
           "deps": [
-            "r1-zero-impact",
-            "c2-meson-gate",
-            "c5-ahead-split"
+            "b1-single-build",
+            "c3-symbol-verify"
           ],
           "completedAt": "",
           "details": [
@@ -1023,7 +1176,7 @@
               "title": "事实",
               "items": [
                 "方案文档第八节关键验收点：未启用零影响 = 无 iovis 日志、CPU 无可测增量。",
-                "c2-meson-gate 提供编译期关闭、r1 移除运行时节流日志、c5 保证 feed 入口短路。"
+                "c2-meson-gate 提供编译期关闭、r1-zero-impact 移除运行时节流日志、c5-ahead-split 保证 feed 入口短路。"
               ]
             },
             {
@@ -1035,8 +1188,9 @@
             {
               "title": "验证",
               "items": [
-                "不注册任何回调播放：日志无 iovis 行，CPU 无可测增量。",
-                "开关 disabled 出包：nm 查不到对应符号。"
+                "不注册任何回调播放：日志无 iovis 行（含 r1 节流日志已移除），CPU 无可测增量。",
+                "未注册时三路径 feed 入口仅必要 atomic 检查即早退（c5 短路）。",
+                "开关 disabled 出包：nm 查不到对应符号（与 c3 联动）。"
               ]
             },
             {
@@ -1060,17 +1214,72 @@
           ]
         },
         {
-          "id": "v2-engineering-verify",
-          "title": "三路径启用行为回归",
-          "desc": "汇聚验证：realtime 全声道 chunk + Δpts 对齐、package 锁外异步解码 demux 无卡顿、ahead-pcm 切轨后正确，no-op 回归通过。",
+          "id": "h3-noop-regression",
+          "title": "ahead-pcm-tap 无害化回归（含 h1/h2）",
+          "desc": "守住未注册回调时严格 no-op、接口/字段/线程模型/队列容量不变；并确认 h1/h2 修复后切轨解码正确、失败退避与丢包计数生效，作为无害化收口回归门。",
           "status": "planned",
           "deps": [
-            "r2-channel-format",
-            "r4-consumer-dispatch",
-            "a1-lock-contract",
-            "a3-track-switch",
-            "h3-noop-regression",
-            "c3-symbol-verify"
+            "b1-single-build",
+            "h1-bug-decoder-ctx",
+            "h2-bug-retry-drop"
+          ],
+          "completedAt": "",
+          "details": [
+            {
+              "title": "事实",
+              "items": [
+                "feed_pcm_path 首行 atomic_load(&g_pcm_active) 早退即 no-op（0002 补丁第 240-241 行）。",
+                "方案文档第六节 6.3 复核结论：disable 时序 broadcast→join→free_queue→free(g_par) 正确，无 use-after-free/double-free，无害化时勿动。",
+                "无害化口径：接口、字段、线程模型、队列容量维持不变；h1 修 ctx/g_par 刷新、h2 修失败退避与丢包计数。"
+              ]
+            },
+            {
+              "title": "基于事实的演绎推理",
+              "items": [
+                "因为无害化核心承诺是『不增功能、未注册 no-op』，所以收口须有回归门确认 h1/h2 修复未破坏 no-op 语义与既有正确生命周期时序。"
+              ]
+            },
+            {
+              "title": "验证",
+              "items": [
+                "不注册 pcm 回调时无队列/无线程活动、无日志、无分配。",
+                "enable/disable 反复切换无线程泄漏、无崩溃（沿用既有正确时序）。",
+                "切音轨（codec 变化）后注册 pcm 回调仍正确解出 PCM（h1）。",
+                "解码失败不再每包重试、队列满有丢包计数/节流日志（h2）；iovis_la_pcm 接口与队列容量与冻结前一致。"
+              ]
+            },
+            {
+              "title": "证据缺口",
+              "items": []
+            },
+            {
+              "title": "验收边界",
+              "items": [
+                "只做无害化回归确认与 h1/h2 修复确认；不引入任何新能力。"
+              ]
+            },
+            {
+              "title": "交付物",
+              "items": []
+            },
+            {
+              "title": "任务总结",
+              "items": []
+            }
+          ]
+        },
+        {
+          "id": "v2-engineering-verify",
+          "title": "三路径启用行为端到端回归",
+          "desc": "汇聚验证：realtime 全声道 chunk + 时间戳对齐 + 消费侧转换、package 锁外异步解码 demux 无卡顿 + 切轨重建，no-op 回归与符号校验通过。",
+          "status": "planned",
+          "deps": [
+            "b1-single-build",
+            "cv-headers-verify",
+            "c3-symbol-verify",
+            "cv-opaque-verify",
+            "v1-zero-impact-verify",
+            "h3-noop-regression"
           ],
           "completedAt": "",
           "details": [
@@ -1079,22 +1288,23 @@
               "items": [
                 "IovisPCMTapPatch.md 实测基线：realtime 相邻 Δpts_us 恒为 1021678、与墙钟吻合、无丢帧。",
                 "方案文档第八节关键验收点覆盖三路径启用态。",
-                "字幕策略文档要求 final 落库与时间映射重锚，依赖正确的 PCM 与时间戳。"
+                "字幕策略文档要求 final 落库与时间映射重锚，依赖正确的 PCM 与时间戳。",
+                "汇聚的修改任务：r2 全平面、r3 时间戳、r4 消费侧转换、a1 锁外异步、a3 切轨重建。"
               ]
             },
             {
               "title": "基于事实的演绎推理",
               "items": [
-                "因为三路径工程化/无害化改动需端到端确认未破坏既有已验证链路，所以设汇聚回归点统一验收启用态行为。"
+                "因为三路径工程化/无害化改动需端到端确认未破坏既有已验证链路，所以设汇聚回归点统一验收启用态行为，且 deps 收口前序产物级/单点验证。"
               ]
             },
             {
               "title": "验证",
               "items": [
-                "realtime：消费侧收到全声道 chunk，按格式转换出可用 PCM，Δpts 与墙钟吻合。",
-                "package：消费侧锁外异步解码出 PCM，demux 缓冲水位无异常。",
-                "ahead-pcm：切轨后仍正确解出 PCM；不注册时 no-op。",
-                "符号校验(c3)通过，消费侧 import Libmpv 直接用、无手抄。"
+                "realtime：消费侧收到全声道 chunk（r2），按格式 dispatch + AVAudioConverter 转换出可用 PCM（r4），流内 PTS 与墙钟/time-pos 吻合（r3）。",
+                "package：消费侧锁内只拷贝、锁外异步解码出 PCM（a1），demux 缓冲水位无异常；切音轨后重建解码器解码正确（a3）。",
+                "ahead-pcm：复用 h3-noop-regression 结论，切轨后正确、不注册时 no-op。",
+                "符号校验(c3)、公开头(cv-headers-verify)、opaque(cv-opaque-verify)、零影响(v1) 均通过；消费侧 import Libmpv 直接用、无手抄。"
               ]
             },
             {
