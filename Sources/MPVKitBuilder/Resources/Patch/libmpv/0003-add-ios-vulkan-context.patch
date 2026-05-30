@@ -1,0 +1,204 @@
+diff --git a/meson.build b/meson.build
+index fb10be5..54bb278 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1642,6 +1642,18 @@ if features['cocoa'] and features['vulkan'] and features['swift']
+     sources += files('video/out/vulkan/context_mac.m')
+ endif
+ 
++# iOS/tvOS Vulkan (MoltenVK) windowing context. Unlike the macOS context it
++# does not need cocoa/swift: it creates the surface straight from the host
++# CAMetalLayer passed via --wid, so it only requires vulkan on a darwin target.
++ios_vulkan = get_option('ios-vulkan').require(
++    darwin and features['vulkan'] and not features['cocoa'],
++    error_message: 'vulkan was not found or this is a cocoa (macOS) build',
++)
++features += {'ios-vulkan': ios_vulkan.allowed()}
++if features['ios-vulkan']
++    sources += files('video/out/vulkan/context_ios.m')
++endif
++
+ macos_media_player = get_option('macos-media-player').require(
+     features['swift'],
+     error_message: 'Swift was not found!',
+diff --git a/meson.options b/meson.options
+index 52782f7..d68ac25 100644
+--- a/meson.options
++++ b/meson.options
+@@ -101,6 +101,7 @@ option('d3d-hwaccel', type: 'feature', value: 'auto', description: 'D3D11VA hwac
+ option('d3d9-hwaccel', type: 'feature', value: 'auto', description: 'DXVA2 hwaccel')
+ option('gl-dxinterop-d3d9', type: 'feature', value: 'auto', description: 'OpenGL/DirectX DXVA2 hwaccel')
+ option('ios-gl', type: 'feature', value: 'auto', description: 'iOS OpenGL ES interop support')
++option('ios-vulkan', type: 'feature', value: 'auto', description: 'iOS/tvOS Vulkan (MoltenVK) windowing context')
+ option('videotoolbox-gl', type: 'feature', value: 'auto', description: 'Videotoolbox with OpenGL')
+ option('videotoolbox-pl', type: 'feature', value: 'auto', description: 'Videotoolbox with libplacebo')
+ 
+diff --git a/video/out/gpu/context.c b/video/out/gpu/context.c
+index 60c0641..307c752 100644
+--- a/video/out/gpu/context.c
++++ b/video/out/gpu/context.c
+@@ -50,6 +50,7 @@ extern const struct ra_ctx_fns ra_ctx_vulkan_xlib;
+ extern const struct ra_ctx_fns ra_ctx_vulkan_android;
+ extern const struct ra_ctx_fns ra_ctx_vulkan_display;
+ extern const struct ra_ctx_fns ra_ctx_vulkan_mac;
++extern const struct ra_ctx_fns ra_ctx_vulkan_ios;
+ 
+ /* Direct3D 11 */
+ extern const struct ra_ctx_fns ra_ctx_d3d11;
+@@ -96,6 +97,9 @@ static const struct ra_ctx_fns *const contexts[] = {
+ #if HAVE_COCOA && HAVE_SWIFT
+     &ra_ctx_vulkan_mac,
+ #endif
++#if HAVE_IOS_VULKAN
++    &ra_ctx_vulkan_ios,
++#endif
+ #endif
+ 
+ // OpenGL contexts:
+diff --git a/video/out/vulkan/context_ios.m b/video/out/vulkan/context_ios.m
+new file mode 100644
+index 0000000..1fdf285
+--- /dev/null
++++ b/video/out/vulkan/context_ios.m
+@@ -0,0 +1,141 @@
++/*
++ * This file is part of mpv.
++ *
++ * mpv is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * mpv is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++// iOS/tvOS Vulkan (MoltenVK) windowing context.
++//
++// Unlike the macOS context (context_mac.m) this backend does not own a window
++// and does not depend on AppKit/Cocoa or the Swift MacCommon helper. The host
++// application embeds mpv by passing a CAMetalLayer pointer through --wid; we
++// create the Vulkan surface directly from that layer via VK_EXT_metal_surface.
++// The layer is owned by the host (its lifetime is guaranteed for the duration
++// of the context, and detached by setting --wid to 0), so it is not retained.
++
++#import <QuartzCore/QuartzCore.h>
++
++#include <vulkan/vulkan.h>
++#include <vulkan/vulkan_metal.h>
++
++#include "options/options.h"
++#include "video/out/gpu/context.h"
++
++#include "common.h"
++#include "context.h"
++#include "utils.h"
++
++struct priv {
++    struct mpvk_ctx vk;
++    CAMetalLayer *layer; // host-owned, not retained
++};
++
++static CAMetalLayer *ios_vk_get_layer(struct ra_ctx *ctx)
++{
++    int64_t wid = ctx->vo->opts->WinID;
++    if (wid == 0 || wid == -1)
++        return NULL;
++    id obj = (id)(intptr_t)wid;
++    if (![obj isKindOfClass:[CAMetalLayer class]])
++        return NULL;
++    return (CAMetalLayer *)obj;
++}
++
++static void ios_vk_get_pixel_size(CAMetalLayer *layer, int *w, int *h)
++{
++    CGSize size = layer.drawableSize;
++    if (size.width < 1 || size.height < 1) {
++        CGFloat scale = layer.contentsScale > 0 ? layer.contentsScale : 1;
++        size = layer.bounds.size;
++        size.width *= scale;
++        size.height *= scale;
++    }
++    *w = MPMAX((int)size.width, 1);
++    *h = MPMAX((int)size.height, 1);
++}
++
++static void ios_vk_uninit(struct ra_ctx *ctx)
++{
++    struct priv *p = ctx->priv;
++    ra_vk_ctx_uninit(ctx);
++    mpvk_uninit(&p->vk);
++}
++
++static bool ios_vk_init(struct ra_ctx *ctx)
++{
++    struct priv *p = ctx->priv = talloc_zero(ctx, struct priv);
++    struct mpvk_ctx *vk = &p->vk;
++    int msgl = ctx->opts.probing ? MSGL_V : MSGL_ERR;
++
++    p->layer = ios_vk_get_layer(ctx);
++    if (!p->layer) {
++        MP_MSG(ctx, msgl, "No CAMetalLayer was passed via --wid.\n");
++        goto error;
++    }
++
++    if (!mpvk_init(vk, ctx, VK_EXT_METAL_SURFACE_EXTENSION_NAME))
++        goto error;
++
++    VkMetalSurfaceCreateInfoEXT metal_info = {
++        .sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
++        .pNext = NULL,
++        .flags = 0,
++        .pLayer = p->layer,
++    };
++
++    struct ra_ctx_params params = {0};
++
++    VkInstance inst = vk->vkinst->instance;
++    VkResult res = vkCreateMetalSurfaceEXT(inst, &metal_info, NULL, &vk->surface);
++    if (res != VK_SUCCESS) {
++        MP_MSG(ctx, msgl, "Failed creating Metal surface\n");
++        goto error;
++    }
++
++    if (!ra_vk_ctx_init(ctx, vk, params, VK_PRESENT_MODE_FIFO_KHR))
++        goto error;
++
++    return true;
++error:
++    ios_vk_uninit(ctx);
++    return false;
++}
++
++static bool ios_vk_reconfig(struct ra_ctx *ctx)
++{
++    struct priv *p = ctx->priv;
++
++    p->layer = ios_vk_get_layer(ctx);
++    if (!p->layer)
++        return false;
++
++    int w, h;
++    ios_vk_get_pixel_size(p->layer, &w, &h);
++    return ra_vk_ctx_resize(ctx, w, h);
++}
++
++static int ios_vk_control(struct ra_ctx *ctx, int *events, int request, void *arg)
++{
++    return VO_NOTIMPL;
++}
++
++const struct ra_ctx_fns ra_ctx_vulkan_ios = {
++    .type           = "vulkan",
++    .name           = "iosvk",
++    .description    = "iOS/tvOS (Metal/MoltenVK)",
++    .reconfig       = ios_vk_reconfig,
++    .control        = ios_vk_control,
++    .init           = ios_vk_init,
++    .uninit         = ios_vk_uninit,
++};

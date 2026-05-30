@@ -162,10 +162,16 @@ extension LibMpvBuilder {
         // 开关按依赖是否真正产出来 gate，避免依赖缺失时 meson 配置阶段硬失败。
         let hasVulkan = dependencyIsBuilt(.vulkan, platform: platform, arch: arch)
         let hasPlacebo = dependencyIsBuilt(.libplacebo, platform: platform, arch: arch)
+        // iOS/tvOS Vulkan(MoltenVK) 窗口 context（patch 0003 新增）。
+        // 仅在 vulkan 真正产出且非 macOS 时开启：mpv 侧 meson require
+        // (darwin && vulkan && !cocoa)，若强行 enabled 但条件不满足会硬失败。
+        // macOS 走原生 vo（cocoa/swift 全关时无 vulkan 窗口 context），故此处 disabled。
+        let hasIosVulkan = hasVulkan && platform != .macos
         return [
             "-Dvulkan=\(hasVulkan ? "enabled" : "disabled")",
             "-Dvideotoolbox-pl=\(hasPlacebo ? "enabled" : "disabled")",
             "-Dios-gl=\(platform == .macos ? "disabled" : "enabled")",
+            "-Dios-vulkan=\(hasIosVulkan ? "enabled" : "disabled")",
         ]
     }
 
