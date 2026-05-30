@@ -46,7 +46,7 @@ extension Library {
         case .nettle: return "nettle_3.9.1_release_20230601"
         case .libgnutls: return "3.8.3"
         case .libsmbclient: return "samba-4.15.13"
-        case .vulkan: return "v1.2.11"
+        case .vulkan: return "v1.4.1"
         case .libshaderc: return "v2024.4"
         case .lcms2: return "lcms2.17"
         case .libplacebo: return "v7.351.0"
