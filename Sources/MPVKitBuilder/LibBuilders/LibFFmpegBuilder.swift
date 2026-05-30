@@ -168,7 +168,8 @@ final class LibFFmpegBuilder: AutoconfBuilder {
         case "Libavutil":
             return ["hwcontext_vulkan", "hwcontext_vdpau", "hwcontext_vaapi",
                     "hwcontext_qsv", "hwcontext_opencl", "hwcontext_dxva2",
-                    "hwcontext_d3d11va", "hwcontext_cuda", "hwcontext_videotoolbox",
+                    "hwcontext_d3d11va", "hwcontext_d3d12va", "hwcontext_amf",
+                    "hwcontext_cuda", "hwcontext_videotoolbox",
                     "getenv_utf8", "intmath", "libm", "thread",
                     "mem_internal", "internal", "attributes_internal"]
         case "Libavformat":
