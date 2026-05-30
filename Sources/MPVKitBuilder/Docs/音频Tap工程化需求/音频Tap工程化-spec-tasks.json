@@ -325,7 +325,7 @@
           "id": "c4-opaque-multiinstance",
           "title": "多实例 opaque 字段设计（realtime + package）",
           "desc": "为 realtime 与 package 两条工程化路径在数据结构中加 void *opaque 实例标识，经 mpv user-data 注入，解决全进程单槽回调多实例串台。",
-          "status": "planned",
+          "status": "done",
           "deps": [
             "f1-disposition-decision",
             "c1-public-headers"
@@ -358,7 +358,7 @@
             {
               "title": "证据缺口",
               "items": [
-                "mpv user-data 在 AO 层与 demux 层注入路径是否一致、能否覆盖两条工程化路径，需核实 mpv API。"
+                "已核实闭合：方案文档『经 mpv user-data 注入』的字面方案不可行——user-data 属性(mp_property_udata, player/command.c:4555)走 MPContext property 系统，在音频热路径/demux 锁内读取过重。改用 mpv_global* 作进程内唯一实例 token：ao->global(audio/out/internal.h)、demuxer->global(demux/demux.h:269)、mp_client_get_global(handle)→mpctx->global(player/client.h:37, player/client.c:338) 三者同源同指针，AO 层与 demux 层注入点天然一致，覆盖两条工程化路径。"
               ]
             },
             {
@@ -370,11 +370,21 @@
             },
             {
               "title": "交付物",
-              "items": []
+              "items": [
+                "opaque 语义定型：== 该 mpv 实例的 mpv_global* 进程内唯一 token；realtime chunk.opaque 与 package packet.opaque 共用同一 token 语义，两路径可被同一进程级回调按 opaque 路由。",
+                "realtime 落地（0001 补丁）：iovis_tap.h 的 struct iovis_tap_chunk 末尾追加 void *opaque（ABI 向后兼容，旧字段偏移不变）；iovis_tap_feed 注入 chunk.opaque = ao->global。",
+                "共性注入 API（0001 补丁）：iovis_tap.h 新增 void *iovis_instance_token(struct mpv_handle *)，实现 return mp_client_get_global(handle)（本地 extern 声明该内部符号，避免把 player/client.h 拉进音频路径）；消费侧每个 player 调一次拿到 token 作 opaque→player 映射 key。两路径共用此一个 API。",
+                "package 设计（落地归 a2-package-opaque，依赖 c5 拆分）：packet.opaque = demuxer->global，挂载点 add_packet_locked 经 sh->ds->in->d_user->global 或改 feed 签名传 demuxer 取得；token 与 realtime 同源，消费侧复用同一 iovis_instance_token。"
+              ]
             },
             {
               "title": "任务总结",
-              "items": []
+              "items": [
+                "证据缺口闭合：opaque 注入机制定为 mpv_global* token，AO/demux/client 三层同源，两工程化路径一致；user-data 属性树方案因热路径过重被否决。",
+                "realtime chunk.opaque + iovis_instance_token 已落地 0001 补丁，独立类型核验(clang -fsyntax-only)通过，三补丁顺序 git apply 干净。",
+                "package packet.opaque 字段落地交 a2（待 c5 文件拆分后在 package 单元实现），机制与 token API 已就绪可直接复用。",
+                "多实例运行期区分(两 player 按 opaque 路由)与符号导出校验归 cv-opaque-verify / c3-symbol-verify（构建后）。"
+              ]
             }
           ]
         },

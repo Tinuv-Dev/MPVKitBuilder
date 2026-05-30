@@ -21,10 +21,10 @@ index 277b524..dd89274 100644
  
 diff --git a/audio/out/iovis_tap.c b/audio/out/iovis_tap.c
 new file mode 100644
-index 0000000..a5171a9
+index 0000000..3eb6ae4
 --- /dev/null
 +++ b/audio/out/iovis_tap.c
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,67 @@
 +/*
 + * iovis PCM tap - see iovis_tap.h.
 + *
@@ -41,6 +41,12 @@ index 0000000..a5171a9
 +#include "audio/format.h"
 +#include "common/msg.h"
 +
++// Declared in player/client.h (internal API, see line "mp_client_get_global").
++// Declared locally so the audio-path tap need not pull the whole client header
++// in. Returns the process-unique mpv_global* behind a client handle, which is
++// the same pointer stored in ao->global / demuxer->global for that instance.
++struct mpv_global *mp_client_get_global(struct mpv_handle *handle);
++
 +static _Atomic(iovis_tap_callback) g_cb = NULL;
 +static _Atomic(void *) g_user = NULL;
 +
@@ -48,6 +54,11 @@ index 0000000..a5171a9
 +{
 +    atomic_store(&g_user, user);
 +    atomic_store(&g_cb, cb);
++}
++
++void *iovis_instance_token(struct mpv_handle *handle)
++{
++    return handle ? (void *)mp_client_get_global(handle) : NULL;
 +}
 +
 +void iovis_tap_feed(struct ao *ao, void **data, int samples, int64_t out_time_ns)
@@ -64,6 +75,7 @@ index 0000000..a5171a9
 +            .samplerate = ao->samplerate,
 +            .format     = ao->format,
 +            .pts_us     = out_time_ns / 1000,
++            .opaque     = ao->global,   // per-instance token; matches iovis_instance_token
 +        };
 +        cb(atomic_load(&g_user), &chunk);
 +        return;
@@ -82,10 +94,10 @@ index 0000000..a5171a9
 +}
 diff --git a/audio/out/iovis_tap.h b/audio/out/iovis_tap.h
 new file mode 100644
-index 0000000..30bd49f
+index 0000000..9e3d27d
 --- /dev/null
 +++ b/audio/out/iovis_tap.h
-@@ -0,0 +1,40 @@
+@@ -0,0 +1,51 @@
 +/*
 + * iovis PCM tap - non-invasive read-side tap on mpv's audio output path.
 + *
@@ -102,6 +114,7 @@ index 0000000..30bd49f
 +#include <stdint.h>
 +
 +struct ao;
++struct mpv_handle;
 +
 +// One PCM chunk as handed to the audio output. `data` points to plane 0 of the
 +// PCM buffer mpv just filled. For interleaved formats this is the whole buffer;
@@ -113,6 +126,9 @@ index 0000000..30bd49f
 +    int samplerate;
 +    int format;           // AF_FORMAT_*
 +    int64_t pts_us;       // out_time_ns / 1000: delay until last sample is audible
++    void *opaque;         // per-instance token (== iovis_instance_token of the
++                          // owning mpv handle); lets one process-wide callback
++                          // route chunks from multiple players (PiP/multi-player).
 +};
 +
 +typedef void (*iovis_tap_callback)(void *user, const struct iovis_tap_chunk *chunk);
@@ -120,6 +136,13 @@ index 0000000..30bd49f
 +// Process-wide, one-shot registration. The callback runs on mpv's audio pull
 +// thread and MUST NOT block (copy out and return). Pass cb=NULL to disable.
 +void iovis_tap_set_callback(iovis_tap_callback cb, void *user);
++
++// Process-unique token for the mpv instance behind `handle` (its mpv_global*).
++// The consumer calls this once per player to build an opaque -> player map; the
++// same token is delivered as iovis_tap_chunk.opaque and (Path D) as the
++// lookahead packet opaque, so both engineering taps share one instance identity.
++// Returns NULL for a NULL handle. Stable for the lifetime of the mpv instance.
++void *iovis_instance_token(struct mpv_handle *handle);
 +
 +// Internal: called by audio/out/buffer.c right after ao_read_data() filled the
 +// caller's buffer. Not part of any public client API.
