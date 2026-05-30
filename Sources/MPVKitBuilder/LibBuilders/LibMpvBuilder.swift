@@ -155,14 +155,15 @@ extension LibMpvBuilder {
     func gpuOptions(platform: PlatformType, arch: ArchType) -> [String] {
         // vo=gpu-next（libplacebo）在 Apple 上的实际链路是
         // VideoToolbox 解码 -> libplacebo -> MoltenVK(Vulkan) -> CAMetalLayer。
-        // 若不开 vulkan/moltenvk/videotoolbox-pl，gpu-next 拿不到可用 GPU 上下文、
+        // 若不开 vulkan/videotoolbox-pl，gpu-next 拿不到可用 GPU 上下文、
         // 也无法上传 hwdec 帧，表现为「有声音无画面」（音频走 audiounit 仍正常）。
-        // 这里与官方包对齐；开关按依赖是否真正产出来 gate，避免依赖缺失时 meson 配置阶段硬失败。
+        // MoltenVK 不是 mpv 的独立 meson 选项：它是 Vulkan 在 Apple 的实现，
+        // 开 -Dvulkan=enabled 并链接 MoltenVK 库即可，mpv v0.41.0 无 -Dmoltenvk。
+        // 开关按依赖是否真正产出来 gate，避免依赖缺失时 meson 配置阶段硬失败。
         let hasVulkan = dependencyIsBuilt(.vulkan, platform: platform, arch: arch)
         let hasPlacebo = dependencyIsBuilt(.libplacebo, platform: platform, arch: arch)
         return [
             "-Dvulkan=\(hasVulkan ? "enabled" : "disabled")",
-            "-Dmoltenvk=\(hasVulkan ? "enabled" : "disabled")",
             "-Dvideotoolbox-pl=\(hasPlacebo ? "enabled" : "disabled")",
             "-Dios-gl=\(platform == .macos ? "disabled" : "enabled")",
         ]

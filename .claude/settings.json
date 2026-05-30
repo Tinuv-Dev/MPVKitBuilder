@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find . -path ./.git -prune -o -name \"*lookahead*\" -print)",
+      "Bash(ls Sources/BuildScripts/patch/libmpv/)",
+      "Bash(find . -name \"*.patch\" -path \"*libmpv*\")",
+      "Bash(sed -i '' 's/let wg = w.text.trimmingCharacters\\(in: .whitespaces\\).count/let wg = w.text.count/' seg_check.swift)",
+      "Bash(swift seg_check.swift)",
+      "Bash(kill %1)",
+      "Bash(pkill -f \"name format.h\")",
+      "Bash(find / -name \"meson_options.txt\" -path \"*libmpv-source*\")",
+      "Bash(find / -name \"meson_options.txt\" -path \"*mpv*\")",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/mpv-player/mpv/v0.41.0/meson_options.txt\")",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/mpv-player/mpv/v0.41.0/meson_options.txt\" -o mo.txt)",
+      "Bash(curl -sL \"https://api.github.com/repos/mpv-player/mpv/tags?per_page=100\")",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/mpv-player/mpv/v0.41.0/meson.options\")"
+    ]
+  }
+}
