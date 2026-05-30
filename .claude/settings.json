@@ -17,7 +17,10 @@
       "Bash(rg -n -i \"patch\" Sources/MPVKitBuilder/*.swift)",
       "Bash(mkdir -p 音频Tap工程化需求)",
       "Bash(mv 音频Tap三路径工程化与无害化落地方案.md 音频Tap工程化需求/)",
-      "Bash(node 需求/validate-spec-tasks.js 音频Tap工程化需求/音频Tap工程化-spec-tasks.json)"
+      "Bash(node 需求/validate-spec-tasks.js 音频Tap工程化需求/音频Tap工程化-spec-tasks.json)",
+      "Bash(git -C build/libmpv-source-v0.41.0 status --short)",
+      "Bash(git -c core.quotepath=false status --short --untracked-files=all)",
+      "Bash(git check-ignore *)"
     ]
   }
 }

@@ -43,6 +43,10 @@ final class LibMpvBuilder: MesonBuilder {
             .appendingPathComponent("include")
             .appendingPathComponent("mpv")
     }
+
+    override func postBuild(platform: PlatformType, arch: ArchType) throws {
+        try installPatchPublicHeaders(platform: platform, arch: arch)
+    }
 }
 
 // MARK: - Meson options
@@ -199,6 +203,41 @@ extension LibMpvBuilder {
     func dependencyIsBuilt(_ dependency: Library, platform: PlatformType, arch: ArchType) -> Bool {
         let thin = ctx.thinDir(dependency, platform: platform, arch: arch)
         return FileManager.default.fileExists(atPath: thin.path)
+    }
+}
+
+// MARK: - Patch public headers
+
+extension LibMpvBuilder {
+    // 补丁新增、需要随产物对消费端公开的头。mpv 的 install_headers 只装
+    // client/render/render_gl/stream_cb，这些头不在其列表，故在 meson install
+    // 之后手动复制到公开头目录 include/mpv：消费端 import Libmpv 即可直接拿到
+    // 声明，无需手抄桥接，消除 ABI 漂移导致的静默错读内存风险。
+    // 补丁未应用时对应文件不在源码树，跳过即可，不影响未启用该能力的构建。
+    var patchPublicHeaders: [String] {
+        [
+            "audio/out/iovis_tap.h",
+            "demux/iovis_lookahead.h",
+        ]
+    }
+
+    func installPatchPublicHeaders(platform: PlatformType, arch: ArchType) throws {
+        let source = ctx.sourceDir(lib)
+        let destination = ctx.thinDir(lib, platform: platform, arch: arch)
+            .appendingPathComponent("include")
+            .appendingPathComponent("mpv")
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        for relativePath in patchPublicHeaders {
+            let from = source.appendingPathComponent(relativePath)
+            guard FileManager.default.fileExists(atPath: from.path) else {
+                ctx.logger.step("skip public header (patch not applied): \(relativePath)")
+                continue
+            }
+            let to = destination.appendingPathComponent(from.lastPathComponent)
+            try removeIfExists(to)
+            try FileManager.default.copyItem(at: from, to: to)
+            ctx.logger.step("installed public header: \(from.lastPathComponent)")
+        }
     }
 }
 
