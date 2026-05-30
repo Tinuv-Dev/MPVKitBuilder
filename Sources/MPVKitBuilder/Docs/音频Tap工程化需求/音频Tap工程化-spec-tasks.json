@@ -460,7 +460,7 @@
           "id": "r1-zero-impact",
           "title": "[realtime·构建端] 未启用零影响：移除 PoC 节流日志",
           "desc": "去掉无回调时的 MP_INFO 节流日志与帧数累加，未启用时只保留一次 atomic_load 早退；诊断日志改由 meson 开关默认关闭提供。",
-          "status": "planned",
+          "status": "done",
           "deps": [
             "c2-meson-gate"
           ],
@@ -500,11 +500,18 @@
             },
             {
               "title": "交付物",
-              "items": []
+              "items": [
+                "iovis_tap.c：无回调分支移除帧数累加与每秒 MP_INFO，cb 为空时仅一次 atomic_load 早退即返回（零日志/零累加/零分配）。",
+                "诊断日志移入 #ifdef IOVIS_TAP_LOG 编译期分支；新增 meson option iovis_tap_log（默认 disabled），meson.build 在 iovis_tap 块内 allowed 时 add_project_arguments('-DIOVIS_TAP_LOG')；Apple builder 不启用，生产默认静默。"
+              ]
             },
             {
               "title": "任务总结",
-              "items": []
+              "items": [
+                "未启用零影响达标：cb 为空时仅一次 atomic_load，无日志/累加/分配。",
+                "排障诊断日志保留但默认编译关闭，需 -Diovis_tap_log=enabled 开启。",
+                "运行期零影响实测归 v1-zero-impact-verify（构建后）。"
+              ]
             }
           ]
         },
@@ -512,7 +519,7 @@
           "id": "r2-channel-format",
           "title": "[realtime·构建端] 忠实暴露全声道/全平面 + 完整格式元数据",
           "desc": "chunk 增 num_planes 与多平面指针（或明确全声道交错块），不再只给 plane0；保持 mpv 侧零 DSP，把声道/格式差异如实交给消费侧。",
-          "status": "planned",
+          "status": "done",
           "deps": [
             "r1-zero-impact",
             "c1-public-headers",
@@ -559,11 +566,18 @@
             },
             {
               "title": "交付物",
-              "items": []
+              "items": [
+                "iovis_tap.h：struct iovis_tap_chunk 新增 int num_planes 与 const void *const *planes（全平面指针，仅回调期间有效），data 保留为 planes[0] 向后兼容。",
+                "iovis_tap.c：feed 填 num_planes = ao->num_planes、planes = (const void *const *)data，无 DSP；interleaved → num_planes=1，planar → num_planes=channels。"
+              ]
             },
             {
               "title": "任务总结",
-              "items": []
+              "items": [
+                "planar 不再只暴露 plane0，全声道/全平面如实交付消费侧；mpv 侧零重采样/下混。",
+                "num_planes 直接复用 mpv 既有 ao->num_planes，与 read_buffer 同源。",
+                "运行期全平面验证归 v2-engineering-verify，消费侧转换归 r4-consumer-dispatch。"
+              ]
             }
           ]
         },
@@ -571,7 +585,7 @@
           "id": "r3-timestamp",
           "title": "[realtime·构建端] 时间戳口径：设备延迟 + 流内 PTS",
           "desc": "chunk 同时给『到扬声器延迟』与『流内 PTS / time-pos』，供字幕对齐；真机实测校准对齐误差。",
-          "status": "planned",
+          "status": "done",
           "deps": [
             "r2-channel-format"
           ],
@@ -612,11 +626,18 @@
             },
             {
               "title": "交付物",
-              "items": []
+              "items": [
+                "iovis_tap.h：chunk 新增 double pts_stream（本 chunk 首样本流内 PTS 秒，与 time-pos 同钟），保留 pts_us（设备延迟）。",
+                "buffer.c：read_buffer / ao_read_data_locked 增 double *stream_pts 输出参数，首样本拷贝处捕获 mp_aframe_get_pts(p->pending)（skip_samples 持续推进 pts，故恒为下一待输出样本流内 PTS）；ao_read_data 声明局部 stream_pts 传入并交给 feed；其余两处 read_buffer 调用传 NULL；未知为 MP_NOPTS_VALUE。"
+              ]
             },
             {
               "title": "任务总结",
-              "items": []
+              "items": [
+                "流内 PTS 来源已核实：AO 层无现成 time-pos API，经 aframe pts 在 read_buffer 捕获是唯一可靠来源；ao_read_data 对外签名不变，但 buffer.c 内部改动面扩大（rebase 成本略升）。",
+                "设备延迟(pts_us)与流内 PTS(pts_stream)双口径并存，供消费侧字幕对齐。",
+                "时间戳吻合度真机校准归 v2-engineering-verify。"
+              ]
             }
           ]
         },
@@ -624,7 +645,7 @@
           "id": "a1-lock-contract",
           "title": "[package·构建端] 持锁回调契约公开头文档化",
           "desc": "在公开头明确『回调持 demux 锁、禁止阻塞/调任何 mpv API』的强约束注释，并指向消费侧锁内只 memcpy 入无锁队列、解码异步的标准范式（范式实现归 a1-ringbuffer-consumer）。",
-          "status": "planned",
+          "status": "done",
           "deps": [
             "c1-public-headers",
             "c5-ahead-split"
@@ -665,11 +686,16 @@
             },
             {
               "title": "交付物",
-              "items": []
+              "items": [
+                "iovis_lookahead.h：新增『Path D threading contract』段，明确回调在 demux 线程持 demux 锁运行、禁阻塞/禁 I/O/禁解码/禁重入 mpv API，并规定消费侧 ring buffer 范式（回调内仅 memcpy 压缩字节 + codecpar 摘要入无锁队列、解码在队列另一端）。"
+              ]
             },
             {
               "title": "任务总结",
-              "items": []
+              "items": [
+                "持锁契约文档化（构建端，纯注释，不改对外符号）。",
+                "消费侧 ring buffer 范式实现归 a1-ringbuffer-consumer，demux 水位运行期验证归 v2-engineering-verify。"
+              ]
             }
           ]
         },
@@ -677,7 +703,7 @@
           "id": "a2-package-opaque",
           "title": "[package·构建端] package 路径 opaque 字段落地",
           "desc": "把 c4-opaque-build 定型的 opaque 设计落到 ahead-package-tap 的 iovis_la_packet（packet.opaque = demuxer->global），区分多 demuxer/player。消费侧路由归 cv-opaque-consumer。",
-          "status": "planned",
+          "status": "done",
           "deps": [
             "c4-opaque-build",
             "c5-ahead-split"
@@ -718,11 +744,19 @@
             },
             {
               "title": "交付物",
-              "items": []
+              "items": [
+                "iovis_lookahead.h：iovis_la_packet 新增 void *opaque（== demuxer->global 进程内唯一 token），加 struct demuxer 前置声明，iovis_lookahead_feed 签名增 struct demuxer *demuxer。",
+                "iovis_lookahead_internal.h / iovis_lookahead.c：两路径 feed 与共享入口透传 demuxer。",
+                "iovis_ahead_package.c：include demux/demux.h，pkt.opaque = demuxer ? demuxer->global : NULL。",
+                "demux.c：add_packet_locked 调用改为 iovis_lookahead_feed(stream, dp, in->d_user)。"
+              ]
             },
             {
               "title": "任务总结",
-              "items": []
+              "items": [
+                "package packet.opaque 与 realtime chunk.opaque 同源（mpv_global* token），消费侧可统一路由。",
+                "消费侧 opaque→player 路由归 cv-opaque-consumer，多实例运行期验证归 cv-opaque-verify。"
+              ]
             }
           ]
         },
@@ -730,7 +764,7 @@
           "id": "a3-track-contract",
           "title": "[package·构建端] 切轨 codecpar 生命周期公开头文档化",
           "desc": "在公开头明确 codecpar 生命周期 = track、retain 须 copy、mpv 侧切轨无状态，消费侧自行检测变化重建解码器（重建实现归 a3-track-switch-consumer）。",
-          "status": "planned",
+          "status": "done",
           "deps": [
             "c1-public-headers",
             "c5-ahead-split"
@@ -771,11 +805,16 @@
             },
             {
               "title": "交付物",
-              "items": []
+              "items": [
+                "iovis_lookahead.h：iovis_la_packet.codecpar 注释强化——生命周期=track、仅回调期间有效、retain 须 avcodec_parameters_copy、切轨时 codec_id/sample_rate/channels 变化须由消费侧检测并重建解码器、mpv 侧无解码状态。"
+              ]
             },
             {
               "title": "任务总结",
-              "items": []
+              "items": [
+                "切轨 codecpar 约束文档化（构建端，mpv 侧无代码逻辑改动）。",
+                "消费侧检测重建归 a3-track-switch-consumer，切轨运行期验证归 v2-engineering-verify。"
+              ]
             }
           ]
         },
@@ -783,7 +822,7 @@
           "id": "h1-bug-decoder-ctx",
           "title": "[pcm·构建端] 修复切轨解码器 ctx 不刷新（bug #1/#2）",
           "desc": "worker 解码器 ctx 只认首个 g_par、切轨后用旧 codec，须检测 g_par 变化时重建 ctx；仅修正确性，不扩接口、不改 PCM 输出形态。",
-          "status": "planned",
+          "status": "done",
           "deps": [
             "c5-ahead-split"
           ],
@@ -823,11 +862,17 @@
             },
             {
               "title": "交付物",
-              "items": []
+              "items": [
+                "iovis_ahead_pcm.c：新增 g_par_gen（g_par 变化时 ++）；feed 检测 sh->codec->lav_codecpar 的 codec_id/sample_rate/channels 变化时 free 旧 g_par、copy 新 par、bump gen（替代原 if(!g_par) 仅捕获一次）；worker 用局部 built_gen，gen 变化时 free 旧 ctx 并按新 g_par 重建。"
+              ]
             },
             {
               "title": "任务总结",
-              "items": []
+              "items": [
+                "切轨 codec 变化后解码器随之重建，消除『用旧解码器解码错误/静默无输出』(#1/#2)。",
+                "iovis_la_pcm 接口/字段/线程模型/队列容量不变，符合无害化。",
+                "切轨解码正确性运行期验证归 h3-noop-regression。"
+              ]
             }
           ]
         },
@@ -835,7 +880,7 @@
           "id": "h2-bug-retry-drop",
           "title": "[pcm·构建端] 修复解码失败无退避 + 队列满静默丢包（bug #3/#4）",
           "desc": "open2 失败后停止每包重试（一次标记），队列满丢包时加计数/节流提示；不改 no-op 语义与队列容量。",
-          "status": "planned",
+          "status": "done",
           "deps": [
             "c5-ahead-split"
           ],
@@ -876,11 +921,17 @@
             },
             {
               "title": "交付物",
-              "items": []
+              "items": [
+                "iovis_ahead_pcm.c #3：worker 重建分支内先置 built_gen = g_par_gen，open 失败后同 gen 不再每包重试 find_decoder/alloc。",
+                "iovis_ahead_pcm.c #4：feed 拆分 g_run 与 g_count>=CAP 判断；队列满时 ++g_drop_count，解锁后经 demuxer->log 在首次丢包及每满 CAP 打一次节流 MP_WARN；队列容量(1024)与 no-op 语义不变。"
+              ]
             },
             {
               "title": "任务总结",
-              "items": []
+              "items": [
+                "解码失败不再无退避重试(#3)；队列满丢包从静默变为可观测计数/节流日志(#4)。",
+                "不扩公开接口、不改容量；运行期可观测性验证归 h3-noop-regression。"
+              ]
             }
           ]
         }
