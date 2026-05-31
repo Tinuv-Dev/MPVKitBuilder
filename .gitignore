@@ -16,6 +16,9 @@ vulkan-prebuilt.tar.xz
 mpvkit-*.tar.xz
 *.log
 
+# Claude Code
+.claude/
+
 # macOS
 .DS_Store
 
