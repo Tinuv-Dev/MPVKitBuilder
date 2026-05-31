@@ -161,22 +161,22 @@ final class LibFFmpegBuilder: AutoconfBuilder {
             .appendingPathComponent(libName)
     }
 
+    // Single source of truth for the per-framework module-map exclusions.
+    // ResumePlanner folds this into the ffmpeg input hash, so any change here
+    // automatically invalidates the cached build and regenerates the module maps.
+    static let excludeHeadersByFramework: [String: [String]] = [
+        "Libavcodec": ["xvmc", "vdpau", "qsv", "dxva2", "d3d11va", "mathops", "videotoolbox"],
+        "Libavutil": ["hwcontext_vulkan", "hwcontext_vdpau", "hwcontext_vaapi",
+                      "hwcontext_qsv", "hwcontext_opencl", "hwcontext_dxva2",
+                      "hwcontext_d3d11va", "hwcontext_d3d12va", "hwcontext_amf",
+                      "hwcontext_cuda", "hwcontext_videotoolbox",
+                      "getenv_utf8", "intmath", "libm", "thread",
+                      "mem_internal", "internal", "attributes_internal"],
+        "Libavformat": ["os_support"],
+    ]
+
     override func frameworkExcludeHeaders(_ framework: String) -> [String] {
-        switch framework {
-        case "Libavcodec":
-            return ["xvmc", "vdpau", "qsv", "dxva2", "d3d11va", "mathops", "videotoolbox"]
-        case "Libavutil":
-            return ["hwcontext_vulkan", "hwcontext_vdpau", "hwcontext_vaapi",
-                    "hwcontext_qsv", "hwcontext_opencl", "hwcontext_dxva2",
-                    "hwcontext_d3d11va", "hwcontext_d3d12va", "hwcontext_amf",
-                    "hwcontext_cuda", "hwcontext_videotoolbox",
-                    "getenv_utf8", "intmath", "libm", "thread",
-                    "mem_internal", "internal", "attributes_internal"]
-        case "Libavformat":
-            return ["os_support"]
-        default:
-            return []
-        }
+        Self.excludeHeadersByFramework[framework] ?? []
     }
 }
 

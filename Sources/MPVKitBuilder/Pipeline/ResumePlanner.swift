@@ -98,6 +98,16 @@ enum ResumePlanner {
         if lib == .ffmpeg || lib == .libmpv {
             parts.append("ffmpegExtra=\(options.ffmpegExtraArgs.joined(separator: " "))")
         }
+        if lib == .ffmpeg {
+            // Module-map exclusions affect the packaged headers but not the compiled
+            // binary, so fold them into the hash to invalidate stale cached builds
+            // (e.g. when adding hwcontext_amf / hwcontext_d3d12va to the exclude list).
+            let exclude = LibFFmpegBuilder.excludeHeadersByFramework
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key)=\($0.value.sorted().joined(separator: ","))" }
+                .joined(separator: ";")
+            parts.append("ffExclude=[\(exclude)]")
+        }
         if lib == .vulkan, let prebuilt = options.prebuiltVulkanDir {
             parts.append("prebuiltVulkan=\(prebuilt.path)")
         }
