@@ -33,11 +33,11 @@ Fix:
 
 This is stacked on top of 0001-libsmbclient-safer-close.patch.
 
---- a/libavformat/libsmbclient.c
-+++ b/libavformat/libsmbclient.c
+--- a/libavformat/libsmbclient.c	2026-06-06 11:07:13
++++ b/libavformat/libsmbclient.c	2026-06-06 11:07:51
 @@ -19,6 +19,7 @@
   */
-
+ 
  #include <libsmbclient.h>
 +#include <pthread.h>
  #include "libavutil/avstring.h"
@@ -46,7 +46,7 @@ This is stacked on top of 0001-libsmbclient-safer-close.patch.
 @@ -35,6 +36,16 @@
      char *workgroup;
  } LIBSMBContext;
-
+ 
 +/* MPVKit patch: Samba's smbc_* API mutates process-wide state (current
 + * context, talloc_stackframe, global tevent_contexts list, thread-local
 + * _SMBCCTX) with no internal locking. mpv tears down the previous SMB
@@ -65,7 +65,7 @@ This is stacked on top of 0001-libsmbclient-safer-close.patch.
  {
      LIBSMBContext *libsmbc = h->priv_data;
 +    int ret = 0;
-
+ 
 +    pthread_mutex_lock(&libsmbc_ctx_mutex);
 +    /* MPVKit patch: drop any current-context pointer left over from a
 +     * predecessor that may still be in flight on another thread. */
@@ -87,10 +87,10 @@ This is stacked on top of 0001-libsmbclient-safer-close.patch.
 +        goto end;
      }
      smbc_set_context(libsmbc->ctx);
-
+ 
 @@ -70,11 +87,14 @@
          smbc_setWorkgroup(libsmbc->ctx, libsmbc->workgroup);
-
+ 
      if (smbc_init(NULL, 0) < 0) {
 -        int ret = AVERROR(errno);
 +        ret = AVERROR(errno);
@@ -104,7 +104,7 @@ This is stacked on top of 0001-libsmbclient-safer-close.patch.
 +    pthread_mutex_unlock(&libsmbc_ctx_mutex);
 +    return ret;
  }
-
+ 
  static av_cold int libsmbc_close(URLContext *h)
 @@ -88,6 +108,7 @@
       * read/seek frame is still in flight (e.g. seeking into an
@@ -121,3 +121,4 @@ This is stacked on top of 0001-libsmbclient-safer-close.patch.
 +    pthread_mutex_unlock(&libsmbc_ctx_mutex);
      return 0;
  }
+ 
