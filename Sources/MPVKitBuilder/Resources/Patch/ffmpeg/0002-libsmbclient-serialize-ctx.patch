@@ -1,0 +1,123 @@
+Subject: [PATCH] libavformat/libsmbclient: serialize SMB context lifecycle
+
+Samba's smbc_* API touches process-wide state (current context,
+talloc_stackframe machinery, the global tevent_contexts list, the
+thread-local _SMBCCTX cache) with no internal locking. When mpv seeks
+into an uncached region while paused, the demux thread tears down the
+previous SMB stream (libsmbc_close -> smbc_free_context) while the
+stream layer concurrently opens a new one (libsmbc_open ->
+libsmbc_connect -> smbc_new_context / smbc_set_context). The two paths
+race on the same talloc tree and on the current-context pointer,
+corrupting the new tevent_context's talloc parent. The damage surfaces
+later inside cli_connect_nb when the event loop dereferences ev:
+
+    tevent_trace_point_callback   <- crash, ev is dangling
+    poll_event_loop_poll
+    _tevent_loop_once
+    tevent_req_poll_ntstatus
+    cli_connect_nb
+    SMBC_server_internal
+    smbc_open
+    libsmbc_open
+
+Fix:
+  - introduce a process-wide mutex around the entire libsmbc_connect
+    and libsmbc_close paths so context (de)allocation, smbc_init and
+    the global current-context pointer are never touched in parallel;
+  - clear the current ctx (smbc_set_context(NULL)) at the start of
+    connect so the new ctx does not inherit a dangling pointer from a
+    just-freed predecessor (belt-and-braces with 0001's close-side
+    detach);
+  - funnel the connect error paths through a single unlock label so
+    the lock is always released.
+
+This is stacked on top of 0001-libsmbclient-safer-close.patch.
+
+--- a/libavformat/libsmbclient.c
++++ b/libavformat/libsmbclient.c
+@@ -19,6 +19,7 @@
+  */
+
+ #include <libsmbclient.h>
++#include <pthread.h>
+ #include "libavutil/avstring.h"
+ #include "libavutil/mem.h"
+ #include "libavutil/opt.h"
+@@ -35,6 +36,16 @@
+     char *workgroup;
+ } LIBSMBContext;
+
++/* MPVKit patch: Samba's smbc_* API mutates process-wide state (current
++ * context, talloc_stackframe, global tevent_contexts list, thread-local
++ * _SMBCCTX) with no internal locking. mpv tears down the previous SMB
++ * stream while the next one is being opened (paused-seek into an
++ * uncached region), and the concurrent ctx (de)allocation corrupts the
++ * talloc tree behind the new tevent_context, surfacing later as a
++ * SIGSEGV inside tevent_trace_point_callback when cli_connect_nb enters
++ * poll. Serialize the entire ctx lifecycle. */
++static pthread_mutex_t libsmbc_ctx_mutex = PTHREAD_MUTEX_INITIALIZER;
++
+ static void libsmbc_get_auth_data(SMBCCTX *c, const char *server, const char *share,
+                                   char *workgroup, int workgroup_len,
+                                   char *username, int username_len,
+@@ -47,17 +58,23 @@
+ static av_cold int libsmbc_connect(URLContext *h)
+ {
+     LIBSMBContext *libsmbc = h->priv_data;
++    int ret = 0;
+
++    pthread_mutex_lock(&libsmbc_ctx_mutex);
++    /* MPVKit patch: drop any current-context pointer left over from a
++     * predecessor that may still be in flight on another thread. */
++    smbc_set_context(NULL);
++
+     libsmbc->ctx = smbc_new_context();
+     if (!libsmbc->ctx) {
+-        int ret = AVERROR(errno);
++        ret = AVERROR(errno);
+         av_log(h, AV_LOG_ERROR, "Cannot create context: %s.\n", strerror(errno));
+-        return ret;
++        goto end;
+     }
+     if (!smbc_init_context(libsmbc->ctx)) {
+-        int ret = AVERROR(errno);
++        ret = AVERROR(errno);
+         av_log(h, AV_LOG_ERROR, "Cannot initialize context: %s.\n", strerror(errno));
+-        return ret;
++        goto end;
+     }
+     smbc_set_context(libsmbc->ctx);
+
+@@ -70,11 +87,14 @@
+         smbc_setWorkgroup(libsmbc->ctx, libsmbc->workgroup);
+
+     if (smbc_init(NULL, 0) < 0) {
+-        int ret = AVERROR(errno);
++        ret = AVERROR(errno);
+         av_log(h, AV_LOG_ERROR, "Initialization failed: %s\n", strerror(errno));
+-        return ret;
++        goto end;
+     }
+-    return 0;
++
++end:
++    pthread_mutex_unlock(&libsmbc_ctx_mutex);
++    return ret;
+ }
+
+ static av_cold int libsmbc_close(URLContext *h)
+@@ -88,6 +108,7 @@
+      * read/seek frame is still in flight (e.g. seeking into an
+      * uncached region after a pause). Also detach the per-context
+      * user data and the thread-local current context first. */
++    pthread_mutex_lock(&libsmbc_ctx_mutex);
+     if (libsmbc->ctx) {
+         smbc_setOptionUserData(libsmbc->ctx, NULL);
+         smbc_set_context(NULL);
+@@ -98,6 +119,7 @@
+         smbc_close(libsmbc->fd);
+         libsmbc->fd = -1;
+     }
++    pthread_mutex_unlock(&libsmbc_ctx_mutex);
+     return 0;
+ }
