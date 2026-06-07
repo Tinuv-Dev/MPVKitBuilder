@@ -1,0 +1,277 @@
+Subject: [PATCH] libavformat/libsmbclient: extend ctx lock to cover smbc_open()
+
+0002 serializes libsmbc_connect and libsmbc_close, but the lock is
+dropped before libsmbc_open calls smbc_open(). smbc_open() goes through
+SMBC_server_internal -> cli_connect_nb -> tevent_req_poll, and that
+poll blocks on the SMB protocol handshake. While the poll is in flight,
+another thread tearing down a stream (libsmbc_close ->
+smbc_free_context) or opening a new one (libsmbc_connect ->
+smbc_set_context) mutates Samba's process-wide current-context pointer
+and talloc tree. The trace_point_callback hooked into the poll loop
+notices the inconsistency and aborts with:
+
+    Freed frame .../source3/libsmb/clireadwrite.c:667,
+    expected .../source3/libsmb/libsmb_file.c:54.
+
+Reproducer in DLPlay: open an SMB file, then via the in-player sidebar
+switch to a second SMB file. The demux thread of the new stream enters
+libsmbc_open while the old stream's close/read paths are still running.
+
+Fix:
+  - split libsmbc_connect / libsmbc_close into "_locked" helpers that
+    assume the caller already holds the mutex, plus thin wrappers that
+    take the lock (kept so existing call sites stay valid);
+  - rewrite libsmbc_open to take the lock once, run connect + smbc_open
+    + smbc_fstat under it, and only release after the file is fully
+    opened. On any failure inside the locked region we call
+    libsmbc_close_locked first, then unlock — keeping the lock
+    non-recursive (libsmbc_close would dead-lock otherwise);
+  - apply the same locked-open + locked-close + unlock-on-failure
+    pattern to libsmbc_open_dir, libsmbc_delete, libsmbc_move so every
+    code path that issues smbc_* protocol calls runs under the same
+    lock as smbc_free_context.
+
+Trade-off: only one SMB ctx (de)allocation or open is in flight at any
+time process-wide. read/seek/write stay lock-free, so steady-state
+playback throughput is unchanged; only the brief stream switch window
+is serialized.
+
+This is stacked on top of 0002-libsmbclient-serialize-ctx.patch.
+
+--- a/libavformat/libsmbclient.c
++++ b/libavformat/libsmbclient.c
+@@ -55,26 +55,26 @@
+      * Callback must exists, there might be a segmentation fault otherwise. */
+ }
+ 
+-static av_cold int libsmbc_connect(URLContext *h)
++/* MPVKit patch: caller must hold libsmbc_ctx_mutex. Used by libsmbc_open
++ * and friends to run "create ctx + smbc_open" as a single critical section
++ * so smbc_open's internal cli_connect_nb poll can't race with another
++ * thread mutating the global current ctx via smbc_set_context. */
++static av_cold int libsmbc_connect_locked(URLContext *h)
+ {
+     LIBSMBContext *libsmbc = h->priv_data;
+-    int ret = 0;
+ 
+-    pthread_mutex_lock(&libsmbc_ctx_mutex);
+     /* MPVKit patch: drop any current-context pointer left over from a
+      * predecessor that may still be in flight on another thread. */
+     smbc_set_context(NULL);
+ 
+     libsmbc->ctx = smbc_new_context();
+     if (!libsmbc->ctx) {
+-        ret = AVERROR(errno);
+         av_log(h, AV_LOG_ERROR, "Cannot create context: %s.\n", strerror(errno));
+-        goto end;
++        return AVERROR(errno);
+     }
+     if (!smbc_init_context(libsmbc->ctx)) {
+-        ret = AVERROR(errno);
+         av_log(h, AV_LOG_ERROR, "Cannot initialize context: %s.\n", strerror(errno));
+-        goto end;
++        return AVERROR(errno);
+     }
+     smbc_set_context(libsmbc->ctx);
+ 
+@@ -87,17 +87,23 @@
+         smbc_setWorkgroup(libsmbc->ctx, libsmbc->workgroup);
+ 
+     if (smbc_init(NULL, 0) < 0) {
+-        ret = AVERROR(errno);
+         av_log(h, AV_LOG_ERROR, "Initialization failed: %s\n", strerror(errno));
+-        goto end;
++        return AVERROR(errno);
+     }
++    return 0;
++}
+ 
+-end:
++static av_cold int libsmbc_connect(URLContext *h)
++{
++    int ret;
++    pthread_mutex_lock(&libsmbc_ctx_mutex);
++    ret = libsmbc_connect_locked(h);
+     pthread_mutex_unlock(&libsmbc_ctx_mutex);
+     return ret;
+ }
+ 
+-static av_cold int libsmbc_close(URLContext *h)
++/* MPVKit patch: caller must hold libsmbc_ctx_mutex. */
++static av_cold int libsmbc_close_locked(URLContext *h)
+ {
+     LIBSMBContext *libsmbc = h->priv_data;
+     /* MPVKit patch: do not call smbc_close(fd) explicitly before
+@@ -108,7 +114,6 @@
+      * read/seek frame is still in flight (e.g. seeking into an
+      * uncached region after a pause). Also detach the per-context
+      * user data and the thread-local current context first. */
+-    pthread_mutex_lock(&libsmbc_ctx_mutex);
+     if (libsmbc->ctx) {
+         smbc_setOptionUserData(libsmbc->ctx, NULL);
+         smbc_set_context(NULL);
+@@ -119,6 +124,13 @@
+         smbc_close(libsmbc->fd);
+         libsmbc->fd = -1;
+     }
++    return 0;
++}
++
++static av_cold int libsmbc_close(URLContext *h)
++{
++    pthread_mutex_lock(&libsmbc_ctx_mutex);
++    libsmbc_close_locked(h);
+     pthread_mutex_unlock(&libsmbc_ctx_mutex);
+     return 0;
+ }
+@@ -132,8 +144,16 @@
+     libsmbc->fd = -1;
+     libsmbc->filesize = -1;
+ 
+-    if ((ret = libsmbc_connect(h)) < 0)
+-        goto fail;
++    /* MPVKit patch: hold the lock from connect through smbc_open()/fstat
++     * so the SMB protocol handshake inside smbc_open (SMBC_server_internal
++     * -> cli_connect_nb -> poll) can't race with another thread's connect
++     * or close mutating the global current ctx / talloc tree, which would
++     * surface as a talloc stackframe imbalance crash. */
++    pthread_mutex_lock(&libsmbc_ctx_mutex);
++    if ((ret = libsmbc_connect_locked(h)) < 0) {
++        libsmbc_close_locked(h);
++        goto unlock_fail;
++    }
+ 
+     if ((flags & AVIO_FLAG_WRITE) && (flags & AVIO_FLAG_READ)) {
+         access = O_CREAT | O_RDWR;
+@@ -150,7 +170,8 @@
+     if ((libsmbc->fd = smbc_open(url, access, 0666)) < 0) {
+         ret = AVERROR(errno);
+         av_log(h, AV_LOG_ERROR, "File open failed: %s\n", strerror(errno));
+-        goto fail;
++        libsmbc_close_locked(h);
++        goto unlock_fail;
+     }
+ 
+     if (smbc_fstat(libsmbc->fd, &st) < 0)
+@@ -158,9 +179,10 @@
+     else
+         libsmbc->filesize = st.st_size;
+ 
++    pthread_mutex_unlock(&libsmbc_ctx_mutex);
+     return 0;
+-  fail:
+-    libsmbc_close(h);
++  unlock_fail:
++    pthread_mutex_unlock(&libsmbc_ctx_mutex);
+     return ret;
+ }
+ 
+@@ -219,19 +241,26 @@
+     LIBSMBContext *libsmbc = h->priv_data;
+     int ret;
+ 
+-    if ((ret = libsmbc_connect(h)) < 0)
+-        goto fail;
++    /* MPVKit patch: see libsmbc_open — same locked window applies to the
++     * opendir protocol handshake. */
++    pthread_mutex_lock(&libsmbc_ctx_mutex);
++    if ((ret = libsmbc_connect_locked(h)) < 0) {
++        libsmbc_close_locked(h);
++        goto unlock_fail;
++    }
+ 
+     if ((libsmbc->dh = smbc_opendir(h->filename)) < 0) {
+         ret = AVERROR(errno);
+         av_log(h, AV_LOG_ERROR, "Error opening dir: %s\n", strerror(errno));
+-        goto fail;
++        libsmbc_close_locked(h);
++        goto unlock_fail;
+     }
+ 
++    pthread_mutex_unlock(&libsmbc_ctx_mutex);
+     return 0;
+ 
+-  fail:
+-    libsmbc_close(h);
++  unlock_fail:
++    pthread_mutex_unlock(&libsmbc_ctx_mutex);
+     return ret;
+ }
+ 
+@@ -324,17 +353,20 @@
+     int ret;
+     struct stat st;
+ 
+-    if ((ret = libsmbc_connect(h)) < 0)
+-        goto cleanup;
++    /* MPVKit patch: keep the entire delete protocol exchange inside the
++     * lock so smbc_open/fstat/unlink can't race with another ctx. */
++    pthread_mutex_lock(&libsmbc_ctx_mutex);
++    if ((ret = libsmbc_connect_locked(h)) < 0)
++        goto cleanup_locked;
+ 
+     if ((libsmbc->fd = smbc_open(h->filename, O_WRONLY, 0666)) < 0) {
+         ret = AVERROR(errno);
+-        goto cleanup;
++        goto cleanup_locked;
+     }
+ 
+     if (smbc_fstat(libsmbc->fd, &st) < 0) {
+         ret = AVERROR(errno);
+-        goto cleanup;
++        goto cleanup_locked;
+     }
+ 
+     smbc_close(libsmbc->fd);
+@@ -343,19 +375,20 @@
+     if (S_ISDIR(st.st_mode)) {
+         if (smbc_rmdir(h->filename) < 0) {
+             ret = AVERROR(errno);
+-            goto cleanup;
++            goto cleanup_locked;
+         }
+     } else {
+         if (smbc_unlink(h->filename) < 0) {
+             ret = AVERROR(errno);
+-            goto cleanup;
++            goto cleanup_locked;
+         }
+     }
+ 
+     ret = 0;
+ 
+-cleanup:
+-    libsmbc_close(h);
++cleanup_locked:
++    libsmbc_close_locked(h);
++    pthread_mutex_unlock(&libsmbc_ctx_mutex);
+     return ret;
+ }
+ 
+@@ -364,18 +397,21 @@
+     LIBSMBContext *libsmbc = h_src->priv_data;
+     int ret;
+ 
+-    if ((ret = libsmbc_connect(h_src)) < 0)
+-        goto cleanup;
++    /* MPVKit patch: keep the rename protocol exchange inside the lock. */
++    pthread_mutex_lock(&libsmbc_ctx_mutex);
++    if ((ret = libsmbc_connect_locked(h_src)) < 0)
++        goto cleanup_locked;
+ 
+     if ((libsmbc->dh = smbc_rename(h_src->filename, h_dst->filename)) < 0) {
+         ret = AVERROR(errno);
+-        goto cleanup;
++        goto cleanup_locked;
+     }
+ 
+     ret = 0;
+ 
+-cleanup:
+-    libsmbc_close(h_src);
++cleanup_locked:
++    libsmbc_close_locked(h_src);
++    pthread_mutex_unlock(&libsmbc_ctx_mutex);
+     return ret;
+ }
+ 
