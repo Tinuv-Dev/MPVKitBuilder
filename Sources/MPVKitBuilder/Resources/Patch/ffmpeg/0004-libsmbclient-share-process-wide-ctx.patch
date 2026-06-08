@@ -22,9 +22,12 @@ walking poisoned memory.
 
 We cannot fix Samba from ffmpeg. Avoid the path instead: keep one
 process-wide SMBCCTX, lazy-init it on the first connect, and never
-free it. close_locked drops only the per-URL fd/dh — those go
-through plain smbc_close / smbc_closedir, not through
-purge_cached_servers / cli_shutdown.
+free it. close_locked drops only the per-URL fd via plain smbc_close,
+which does not touch purge_cached_servers / cli_shutdown. The dh
+field is intentionally left to libsmbc_close_dir — ffmpeg
+zero-initializes priv_data, so dh defaults to 0 (not -1), and the
+url_open path never assigns it; touching it here would dereference
+a NULL function pointer inside smbc_closedir(0).
 
 Why this is safe:
   - cli pool stays in the global ctx, naturally keyed by
@@ -145,7 +148,7 @@ ctx options and the open/close fast paths).
      return 0;
  }
  
-@@ -106,24 +122,20 @@
+@@ -106,24 +122,19 @@
  static av_cold int libsmbc_close_locked(URLContext *h)
  {
      LIBSMBContext *libsmbc = h->priv_data;
@@ -164,19 +167,18 @@ ctx options and the open/close fast paths).
 -        libsmbc->ctx = NULL;
 -        libsmbc->fd  = -1;
 -    } else if (libsmbc->fd >= 0) {
-+    /* MPVKit patch: 全局 ctx 不在这里释放 — 只关 fd 和 dh。
++    /* MPVKit patch: 全局 ctx 不在这里释放 — 只关 fd。
 +     * 彻底绕开 smbc_free_context(ctx, 1) -> cli_shutdown -> cli_close
 +     * 路径，避免 Samba 内部 talloc_stackframe 嵌套不平衡破坏全局 talloc
-+     * tree。本地 URLContext 持有的 fd/dh 单独 close 是安全的：
-+     * smbc_close(fd) / smbc_closedir(dh) 不会触发 cli pool 重组。 */
++     * tree。本地 URLContext 持有的 fd 单独 close 是安全的：
++     * smbc_close(fd) 不会触发 cli pool 重组。
++     * dh 不在这里处理 —— ffmpeg 把 priv_data zero-init，dh 默认是 0
++     * 而不是 -1，open 路径根本没 setup 过 dh，碰它会 smbc_closedir(0)
++     * 解引用 NULL 函数指针。dh 的关闭归 libsmbc_close_dir 管。 */
 +    if (libsmbc->fd >= 0) {
          smbc_close(libsmbc->fd);
          libsmbc->fd = -1;
      }
-+    if (libsmbc->dh >= 0) {
-+        smbc_closedir(libsmbc->dh);
-+        libsmbc->dh = -1;
-+    }
 +    libsmbc->ctx = NULL;
      return 0;
  }
