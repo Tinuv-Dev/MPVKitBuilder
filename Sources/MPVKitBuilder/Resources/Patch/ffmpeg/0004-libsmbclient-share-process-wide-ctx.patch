@@ -1,0 +1,183 @@
+Subject: [PATCH] libavformat/libsmbclient: share a single process-wide SMBCCTX
+
+After 0003 covered the open/connect window with the lock, mpv stream
+switches still crash with errors like:
+
+    Freed frame .../source3/libsmb/clireadwrite.c:667,
+    expected .../source3/libsmb/libsmb_context.c:50.
+    Freed frame .../source3/libsmb/libsmb_context.c:142,
+    expected .../source3/libsmb/libsmb_context.c:50.
+    Bad talloc magic value - access after free
+
+Stack lands variously in SMBC_open_ctx, cli_connect_nb, or
+smbc_setOptionUserData, which is a giveaway that the talloc heap is
+already corrupt by the time the new ctx runs. The corruption happens
+on the *previous* close path: smbc_free_context(ctx, 1) ->
+smbc_getFunctionPurgeCachedServers(ctx)(ctx) -> cli_shutdown ->
+cli_close (clireadwrite.c:667) push/pops thread-local
+talloc_stackframes while libsmb_context.c:50/142 frames are still on
+the stack. Samba 4.x has a known frame-imbalance in this teardown
+path; once it fires, every subsequent smbc_* in the process is
+walking poisoned memory.
+
+We cannot fix Samba from ffmpeg. Avoid the path instead: keep one
+process-wide SMBCCTX, lazy-init it on the first connect, and never
+free it. close_locked drops only the per-URL fd/dh — those go
+through plain smbc_close / smbc_closedir, not through
+purge_cached_servers / cli_shutdown.
+
+Why this is safe:
+  - cli pool stays in the global ctx, naturally keyed by
+    server+share+user inside Samba — exactly what mpv's repeated
+    SMB opens want anyway;
+  - smbc_setOptionUserData is overwritten per connect, but
+    libsmbc_get_auth_data is a no-op (credentials are parsed from
+    the URL), so the data is never read;
+  - smbc_set_context(global) is a no-op when called repeatedly on
+    the same ctx;
+  - the mutex still serializes connect/open/close, so the per-URL
+    timeout / workgroup writes don't race.
+
+Trade-off: the cli pool persists for process lifetime instead of
+being torn down per file. For a typical mpv-style "open a couple of
+SMB files" workload this is exactly what you want; it eliminates
+both the talloc-imbalance crash *and* the per-open SMB handshake
+cost on the same server.
+
+This replaces the ctx (de)allocation strategy installed by 0001 +
+0003 — 0001's "smbc_free_context(ctx, 1)" close path and 0003's
+"smbc_new_context per open" connect path no longer run. The mutex
+infrastructure from 0002 is kept (it still guards the per-URL
+ctx options and the open/close fast paths).
+
+--- a/libavformat/libsmbclient.c
++++ b/libavformat/libsmbclient.c
+@@ -38,14 +38,25 @@
+ 
+ /* MPVKit patch: Samba's smbc_* API mutates process-wide state (current
+  * context, talloc_stackframe, global tevent_contexts list, thread-local
+- * _SMBCCTX) with no internal locking. mpv tears down the previous SMB
+- * stream while the next one is being opened (paused-seek into an
+- * uncached region), and the concurrent ctx (de)allocation corrupts the
+- * talloc tree behind the new tevent_context, surfacing later as a
+- * SIGSEGV inside tevent_trace_point_callback when cli_connect_nb enters
+- * poll. Serialize the entire ctx lifecycle. */
++ * _SMBCCTX) with no internal locking. Serialize the entire ctx lifecycle. */
+ static pthread_mutex_t libsmbc_ctx_mutex = PTHREAD_MUTEX_INITIALIZER;
+ 
++/* MPVKit patch: 进程级共享 SMBCCTX。在进程 lifetime 内只 init 一次，
++ * 从不 free。这样彻底绕开 smbc_free_context(ctx, 1) -> cli_shutdown ->
++ * cli_close (clireadwrite.c:667) 路径 —— Samba 4.x 的 cli_close 在
++ * SMB2 模式下会与外层 SMBC_remove_unused_server /
++ * SMBC_call_purge_cached_servers_fn (libsmb_context.c:50/142) 共用
++ * thread-local talloc_stackframe，push/pop 嵌套不平衡，破坏全局 talloc
++ * tree。任何后续 smbc_* 调用走到损坏内存都会触发
++ * "Bad talloc magic value - access after free"，表象随 timing 各异
++ * (崩在新流 SMBC_open_ctx / cli_connect_nb / smbc_setOptionUserData)，
++ * 根因相同。
++ *
++ * 副作用：cli pool 在进程内累积 (按 server+share+user 缓存)；
++ * UserData 反复覆盖在 libsmbc_get_auth_data 是空实现下无影响；
++ * 同一 ctx 反复 smbc_set_context 无副作用。 */
++static SMBCCTX *libsmbc_global_ctx = NULL;
++
+ static void libsmbc_get_auth_data(SMBCCTX *c, const char *server, const char *share,
+                                   char *workgroup, int workgroup_len,
+                                   char *username, int username_len,
+@@ -63,33 +74,38 @@
+ {
+     LIBSMBContext *libsmbc = h->priv_data;
+ 
+-    /* MPVKit patch: drop any current-context pointer left over from a
+-     * predecessor that may still be in flight on another thread. */
+-    smbc_set_context(NULL);
+-
+-    libsmbc->ctx = smbc_new_context();
+-    if (!libsmbc->ctx) {
+-        av_log(h, AV_LOG_ERROR, "Cannot create context: %s.\n", strerror(errno));
+-        return AVERROR(errno);
+-    }
+-    if (!smbc_init_context(libsmbc->ctx)) {
+-        av_log(h, AV_LOG_ERROR, "Cannot initialize context: %s.\n", strerror(errno));
+-        return AVERROR(errno);
+-    }
+-    smbc_set_context(libsmbc->ctx);
++    /* MPVKit patch: 进程内首次 connect 时 lazy init 全局 ctx。后续所有
++     * URL 共用同一个 SMBCCTX，cli pool 自然按 server+share+user 缓存。
++     * 失败时把局部 ctx free 掉，全局指针保持 NULL 让下次重试。 */
++    if (libsmbc_global_ctx == NULL) {
++        SMBCCTX *ctx = smbc_new_context();
++        if (!ctx) {
++            av_log(h, AV_LOG_ERROR, "Cannot create context: %s.\n", strerror(errno));
++            return AVERROR(errno);
++        }
++        if (!smbc_init_context(ctx)) {
++            av_log(h, AV_LOG_ERROR, "Cannot initialize context: %s.\n", strerror(errno));
++            smbc_free_context(ctx, 1);
++            return AVERROR(errno);
++        }
++        smbc_setFunctionAuthDataWithContext(ctx, libsmbc_get_auth_data);
++        if (smbc_init(NULL, 0) < 0) {
++            av_log(h, AV_LOG_ERROR, "Initialization failed: %s\n", strerror(errno));
++            smbc_free_context(ctx, 1);
++            return AVERROR(errno);
++        }
++        libsmbc_global_ctx = ctx;
++    }
+ 
+-    smbc_setOptionUserData(libsmbc->ctx, h);
+-    smbc_setFunctionAuthDataWithContext(libsmbc->ctx, libsmbc_get_auth_data);
++    libsmbc->ctx = libsmbc_global_ctx;
++    smbc_set_context(libsmbc_global_ctx);
++    smbc_setOptionUserData(libsmbc_global_ctx, h);
+ 
+     if (libsmbc->timeout != -1)
+-        smbc_setTimeout(libsmbc->ctx, libsmbc->timeout);
++        smbc_setTimeout(libsmbc_global_ctx, libsmbc->timeout);
+     if (libsmbc->workgroup)
+-        smbc_setWorkgroup(libsmbc->ctx, libsmbc->workgroup);
++        smbc_setWorkgroup(libsmbc_global_ctx, libsmbc->workgroup);
+ 
+-    if (smbc_init(NULL, 0) < 0) {
+-        av_log(h, AV_LOG_ERROR, "Initialization failed: %s\n", strerror(errno));
+-        return AVERROR(errno);
+-    }
+     return 0;
+ }
+ 
+@@ -106,24 +122,20 @@
+ static av_cold int libsmbc_close_locked(URLContext *h)
+ {
+     LIBSMBContext *libsmbc = h->priv_data;
+-    /* MPVKit patch: do not call smbc_close(fd) explicitly before
+-     * smbc_free_context(ctx, 1) — the shutdown_ctx=1 path already
+-     * force-closes every open file. Stacking two cli_close paths
+-     * through Samba's non-reentrant talloc_stackframe machinery is
+-     * what triggers "Freed frame ... expected ..." mismatches when a
+-     * read/seek frame is still in flight (e.g. seeking into an
+-     * uncached region after a pause). Also detach the per-context
+-     * user data and the thread-local current context first. */
+-    if (libsmbc->ctx) {
+-        smbc_setOptionUserData(libsmbc->ctx, NULL);
+-        smbc_set_context(NULL);
+-        smbc_free_context(libsmbc->ctx, 1);
+-        libsmbc->ctx = NULL;
+-        libsmbc->fd  = -1;
+-    } else if (libsmbc->fd >= 0) {
++    /* MPVKit patch: 全局 ctx 不在这里释放 — 只关 fd 和 dh。
++     * 彻底绕开 smbc_free_context(ctx, 1) -> cli_shutdown -> cli_close
++     * 路径，避免 Samba 内部 talloc_stackframe 嵌套不平衡破坏全局 talloc
++     * tree。本地 URLContext 持有的 fd/dh 单独 close 是安全的：
++     * smbc_close(fd) / smbc_closedir(dh) 不会触发 cli pool 重组。 */
++    if (libsmbc->fd >= 0) {
+         smbc_close(libsmbc->fd);
+         libsmbc->fd = -1;
+     }
++    if (libsmbc->dh >= 0) {
++        smbc_closedir(libsmbc->dh);
++        libsmbc->dh = -1;
++    }
++    libsmbc->ctx = NULL;
+     return 0;
+ }
+ 
