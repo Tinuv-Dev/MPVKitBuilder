@@ -87,7 +87,7 @@ ctx options and the open/close fast paths).
  static void libsmbc_get_auth_data(SMBCCTX *c, const char *server, const char *share,
                                    char *workgroup, int workgroup_len,
                                    char *username, int username_len,
-@@ -63,33 +74,38 @@
+@@ -63,33 +74,42 @@
  {
      LIBSMBContext *libsmbc = h->priv_data;
  
@@ -107,7 +107,9 @@ ctx options and the open/close fast paths).
 -    smbc_set_context(libsmbc->ctx);
 +    /* MPVKit patch: 进程内首次 connect 时 lazy init 全局 ctx。后续所有
 +     * URL 共用同一个 SMBCCTX，cli pool 自然按 server+share+user 缓存。
-+     * 失败时把局部 ctx free 掉，全局指针保持 NULL 让下次重试。 */
++     * 失败时把局部 ctx free 掉，全局指针保持 NULL 让下次重试。
++     * 关键顺序：smbc_set_context(ctx) 必须先于 smbc_init(NULL, 0) 调用 —
++     * smbc_init 是旧 API、按 current ctx 工作，current 未设置时返回 EINVAL。 */
 +    if (libsmbc_global_ctx == NULL) {
 +        SMBCCTX *ctx = smbc_new_context();
 +        if (!ctx) {
@@ -119,9 +121,11 @@ ctx options and the open/close fast paths).
 +            smbc_free_context(ctx, 1);
 +            return AVERROR(errno);
 +        }
++        smbc_set_context(ctx);
 +        smbc_setFunctionAuthDataWithContext(ctx, libsmbc_get_auth_data);
 +        if (smbc_init(NULL, 0) < 0) {
 +            av_log(h, AV_LOG_ERROR, "Initialization failed: %s\n", strerror(errno));
++            smbc_set_context(NULL);
 +            smbc_free_context(ctx, 1);
 +            return AVERROR(errno);
 +        }
@@ -148,7 +152,7 @@ ctx options and the open/close fast paths).
      return 0;
  }
  
-@@ -106,24 +122,19 @@
+@@ -106,24 +126,19 @@
  static av_cold int libsmbc_close_locked(URLContext *h)
  {
      LIBSMBContext *libsmbc = h->priv_data;
