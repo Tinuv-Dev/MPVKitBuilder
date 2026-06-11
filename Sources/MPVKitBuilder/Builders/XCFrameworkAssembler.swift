@@ -80,6 +80,15 @@ extension XCFrameworkAssembler {
             logTo: ctx.logFile(builder.lib.rawValue)
         )
 
+        // Static-archive frameworks carry DWARF debug info inside the .a's object
+        // files. Archive 上传时 App Store Connect 会按 UUID 找 dSYM 而我们不产出
+        // dSYM（dsymutil 不处理 fat static archive），导致 "Upload Symbols Failed"
+        // 告警。release 构建直接 strip 掉 debug section：global 符号保留以便宿主
+        // App 链接，崩溃栈仍可拿到函数名。debug 构建保留以便本地排查。
+        if !ctx.options.enableDebug {
+            try stripDebugSymbols(at: binaryURL, logName: builder.lib.rawValue)
+        }
+
         try copyHeadersIfNeeded(builder: builder, framework: framework, platform: platform, to: frameworkDir)
         try writeModuleMap(builder: builder, framework: framework, to: frameworkDir)
         try writeInfoPlist(framework: framework, platform: platform, to: frameworkDir)
@@ -171,6 +180,14 @@ extension XCFrameworkAssembler {
 // MARK: - Helpers
 
 extension XCFrameworkAssembler {
+    func stripDebugSymbols(at url: URL, logName: String) throws {
+        try ctx.runner.launch(
+            executable: "/usr/bin/xcrun",
+            arguments: ["strip", "-S", "-x", url.path],
+            logTo: ctx.logFile(logName)
+        )
+    }
+
     func removeIfExists(_ url: URL) throws {
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
