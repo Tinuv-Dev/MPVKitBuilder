@@ -1,0 +1,68 @@
+diff --git a/audio/out/ao_audiounit.m b/audio/out/ao_audiounit.m
+index 8d4eb4d..24370cc 100644
+--- a/audio/out/ao_audiounit.m
++++ b/audio/out/ao_audiounit.m
+@@ -148,31 +148,42 @@ static bool init_audiounit(struct ao *ao)
+ 
+     err = au_get_ary(p->audio_unit, kAudioUnitProperty_AudioChannelLayout, kAudioUnitScope_Output,
+                      0, (void**)&layout, &size);
+-    CHECK_CA_ERROR_L(coreaudio_error_audiounit,
+-                     "unable to retrieve audio unit channel layout");
+-
+-    MP_VERBOSE(ao, "AU channel layout tag: %x (%x)\n", layout->mChannelLayoutTag, layout->mChannelBitmap);
+-
+-    layout = convert_layout(layout, &size);
+-    if (!layout) {
+-        MP_ERR(ao, "unable to convert channel layout to list format\n");
+-        goto coreaudio_error_audiounit;
+-    }
+-
+-    for (UInt32 i = 0; i < layout->mNumberChannelDescriptions; i++) {
+-        MP_VERBOSE(ao, "channel map: %i: %u\n", i, layout->mChannelDescriptions[i].mChannelLabel);
+-    }
+-
+-    if (af_fmt_is_spdif(ao->format) || instance.outputNumberOfChannels <= 2) {
++    if (err != noErr) {
++        // tvOS 26+ on spatial-capable output routes (maximumOutputNumberOfChannels = 32,
++        // e.g. HDMI to an Atmos receiver / TV) returns kAudioUnitErr_InvalidProperty
++        // (-10879) for the AudioChannelLayout query on the output scope, even after
++        // AudioUnitInitialize succeeded. There is no usable layout to derive a chmap
++        // from; force stereo (the same chmap the outputNumberOfChannels <= 2 branch
++        // below uses) and let the system downmix. Without this fallback, AO init
++        // aborts and mpv falls back to ao=null -- the user observes silence with
++        // working video.
++        MP_WARN(ao, "unable to retrieve audio unit channel layout (%s), forcing stereo\n",
++                mp_tag_str(err));
+         ao->channels = (struct mp_chmap)MP_CHMAP_INIT_STEREO;
+-        MP_VERBOSE(ao, "using stereo output\n");
+     } else {
+-        ao->channels.num = (uint8_t)layout->mNumberChannelDescriptions;
++        MP_VERBOSE(ao, "AU channel layout tag: %x (%x)\n", layout->mChannelLayoutTag, layout->mChannelBitmap);
++
++        layout = convert_layout(layout, &size);
++        if (!layout) {
++            MP_ERR(ao, "unable to convert channel layout to list format\n");
++            goto coreaudio_error_audiounit;
++        }
++
+         for (UInt32 i = 0; i < layout->mNumberChannelDescriptions; i++) {
+-          ao->channels.speaker[i] =
+-              ca_label_to_mp_speaker_id(layout->mChannelDescriptions[i].mChannelLabel);
++            MP_VERBOSE(ao, "channel map: %i: %u\n", i, layout->mChannelDescriptions[i].mChannelLabel);
++        }
++
++        if (af_fmt_is_spdif(ao->format) || instance.outputNumberOfChannels <= 2) {
++            ao->channels = (struct mp_chmap)MP_CHMAP_INIT_STEREO;
++            MP_VERBOSE(ao, "using stereo output\n");
++        } else {
++            ao->channels.num = (uint8_t)layout->mNumberChannelDescriptions;
++            for (UInt32 i = 0; i < layout->mNumberChannelDescriptions; i++) {
++              ao->channels.speaker[i] =
++                  ca_label_to_mp_speaker_id(layout->mChannelDescriptions[i].mChannelLabel);
++            }
++            MP_VERBOSE(ao, "using standard channel mapping\n");
+         }
+-        MP_VERBOSE(ao, "using standard channel mapping\n");
+     }
+ 
+     ca_fill_asbd(ao, &asbd);
