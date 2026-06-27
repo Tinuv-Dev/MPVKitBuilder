@@ -172,10 +172,19 @@ extension LibMpvBuilder {
         // (darwin && vulkan && !cocoa)，若强行 enabled 但条件不满足会硬失败。
         // macOS 走原生 vo（cocoa/swift 全关时无 vulkan 窗口 context），故此处 disabled。
         let hasIosVulkan = hasVulkan && platform != .macos
+        // ios-gl 依赖 EAGL/OpenGLES：仅真实提供 GLES 的 iOS/tvOS 系平台可启用。
+        // macOS/maccatalyst 用 macOS SDK 无 OpenGLES 头；visionOS 把 EAGL/CVOpenGLES* 标 unavailable。
+        // 用穷举 switch 而非默认分支，确保未来新增平台必须显式表态。
+        let hasIosGL: Bool = {
+            switch platform {
+            case .ios, .isimulator, .tvos, .tvsimulator: return true
+            case .macos, .maccatalyst, .xros, .xrsimulator: return false
+            }
+        }()
         return [
             "-Dvulkan=\(hasVulkan ? "enabled" : "disabled")",
             "-Dvideotoolbox-pl=\(hasPlacebo ? "enabled" : "disabled")",
-            "-Dios-gl=\(platform == .macos ? "disabled" : "enabled")",
+            "-Dios-gl=\(hasIosGL ? "enabled" : "disabled")",
             "-Dios-vulkan=\(hasIosVulkan ? "enabled" : "disabled")",
         ]
     }
