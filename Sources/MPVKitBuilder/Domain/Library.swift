@@ -130,7 +130,7 @@ extension Library {
         switch self {
         case .libbluray:
             return requested.filter { $0 == .macos }
-        case .vulkan, .libzvbi:
+        case .libzvbi:
             return requested.filter { $0 != .maccatalyst }
         default:
             return requested

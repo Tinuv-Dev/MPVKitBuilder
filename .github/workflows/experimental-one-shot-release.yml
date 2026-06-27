@@ -77,9 +77,7 @@ jobs:
           add_platform() {
             if [ "$1" = "true" ]; then
               platforms+=("$2")
-              if [ "$2" != "maccatalyst" ]; then
-                vulkan_platforms+=("$2")
-              fi
+              vulkan_platforms+=("$2")
             fi
           }
 

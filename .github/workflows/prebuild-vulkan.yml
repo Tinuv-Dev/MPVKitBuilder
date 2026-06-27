@@ -6,7 +6,7 @@ on:
       platforms:
         description: 'Comma-separated platforms to bake into MoltenVK.xcframework'
         type: string
-        default: 'macos,ios,isimulator,tvos,tvsimulator,xros,xrsimulator'
+        default: 'macos,ios,isimulator,tvos,tvsimulator,xros,xrsimulator,maccatalyst'
 
 jobs:
   prebuild:
