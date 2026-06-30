@@ -1,0 +1,79 @@
+diff --git a/options/options.c b/options/options.c
+index 716c3e6..0d2f53d 100644
+--- a/options/options.c
++++ b/options/options.c
+@@ -245,6 +245,9 @@ static const m_option_t mp_vo_opt_list[] = {
+ #if HAVE_EGL_ANDROID
+     {"android-surface-size", OPT_SIZE_BOX(android_surface_size)},
+ #endif
++#if HAVE_IOS_VULKAN
++    {"ios-surface-size", OPT_SIZE_BOX(ios_surface_size)},
++#endif
+ #if HAVE_D3D11
+     {"d3d11-composition-size", OPT_SIZE_BOX(d3d11_composition_size)},
+ #endif
+diff --git a/options/options.h b/options/options.h
+index 12dafea..7e62b98 100644
+--- a/options/options.h
++++ b/options/options.h
+@@ -86,6 +86,8 @@ typedef struct mp_vo_opts {
+ 
+     struct m_geometry android_surface_size;
+ 
++    struct m_geometry ios_surface_size;
++
+     struct m_geometry d3d11_composition_size;
+ 
+     int swapchain_depth;  // max number of images to render ahead
+diff --git a/player/command.c b/player/command.c
+index 96bc06a..b09eb8d 100644
+--- a/player/command.c
++++ b/player/command.c
+@@ -8017,7 +8017,9 @@ void mp_option_run_callback(struct MPContext *mpctx, struct mp_option_callback *
+             queue_seek(mpctx, MPSEEK_RELATIVE, 0.0, MPSEEK_EXACT, 0);
+     }
+ 
+-    if (opt_ptr == &opts->vo->android_surface_size || opt_ptr == &opts->vo->d3d11_composition_size) {
++    if (opt_ptr == &opts->vo->android_surface_size ||
++        opt_ptr == &opts->vo->ios_surface_size ||
++        opt_ptr == &opts->vo->d3d11_composition_size) {
+         if (mpctx->video_out)
+             vo_control(mpctx->video_out, VOCTRL_EXTERNAL_RESIZE, NULL);
+     }
+diff --git a/video/out/vulkan/context_ios.m b/video/out/vulkan/context_ios.m
+index 1fdf285..68d417c 100644
+--- a/video/out/vulkan/context_ios.m
++++ b/video/out/vulkan/context_ios.m
+@@ -112,6 +112,23 @@ static bool ios_vk_init(struct ra_ctx *ctx)
+     return false;
+ }
+ 
++// Surface size resolution order: explicit option (set by the host via
++// `set ios-surface-size WxH` in response to a rotation / bounds change) takes
++// precedence over the layer's drawableSize, because MoltenVK on iOS will
++// silently rebuild the swapchain when the CAMetalLayer's drawableSize changes
++// without ever returning VK_SUBOPTIMAL_KHR / VK_ERROR_OUT_OF_DATE_KHR, so the
++// option write is the only authoritative signal that the host has resized.
++static void ios_vk_resolve_size(struct ra_ctx *ctx, CAMetalLayer *layer, int *w, int *h)
++{
++    struct m_geometry g = ctx->vo->opts->ios_surface_size;
++    if (g.w > 0 && g.h > 0) {
++        *w = g.w;
++        *h = g.h;
++        return;
++    }
++    ios_vk_get_pixel_size(layer, w, h);
++}
++
+ static bool ios_vk_reconfig(struct ra_ctx *ctx)
+ {
+     struct priv *p = ctx->priv;
+@@ -121,7 +138,7 @@ static bool ios_vk_reconfig(struct ra_ctx *ctx)
+         return false;
+ 
+     int w, h;
+-    ios_vk_get_pixel_size(p->layer, &w, &h);
++    ios_vk_resolve_size(ctx, p->layer, &w, &h);
+     return ra_vk_ctx_resize(ctx, w, h);
+ }
+ 
