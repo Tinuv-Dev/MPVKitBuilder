@@ -1,0 +1,145 @@
+Subject: [PATCH] libavformat/libsmbclient: serialize read/seek/write on the shared ctx
+
+0004 made every URLContext share one process-wide SMBCCTX and kept
+read/seek/write lock-free, on the implicit assumption that only one
+stream performs SMB I/O at any moment. That assumption held for the
+tvOS player (paused-freeze scrub pipeline: the main mpv never reads
+while the preview mpv works, and preview captures are serialized), but
+the iPhone player breaks it: while the user drags the progress bar the
+main mpv keeps playing (its demux thread keeps calling smbc_read) and
+IovisPlayerFramePreviewer's second mpv instance concurrently
+loadfile/seek/reads the same smb:// URL. Both streams resolve to the
+same server+share+user, so since 0004 they share one Samba cli
+connection. Samba's fd-based I/O has no internal locking; two threads
+interleaving requests on one connection corrupt the talloc_stackframe
+bookkeeping and crash with:
+
+    Freed frame ../../libcli/smb/smbXcli_base.c:1890,
+    expected ../../source3/libsmb/libsmb_file.c:54.
+    Bad talloc magic value - unknown value
+
+(one thread's open/read frame is freed from under it by the other
+thread's poll path — note this is a different frame pair than the
+open/close races fixed by 0001-0004; this one lives entirely in the
+I/O paths the earlier locks deliberately left uncovered).
+
+Fix: bring every remaining smbc_* protocol call under
+libsmbc_ctx_mutex —
+  - libsmbc_seek / libsmbc_read / libsmbc_write wrap the single
+    smbc_lseek/read/write call (the AVSEEK_SIZE fast path stays
+    lock-free: it only reads the per-URL filesize field written once
+    during open);
+  - libsmbc_read_dir locks around the readdir loop through smbc_stat;
+    the lock also covers av_strdup(dirent->name) because dirent points
+    into Samba-internal storage owned by the shared ctx;
+  - libsmbc_close_dir folds smbc_closedir plus the fd close into one
+    critical section via libsmbc_close_locked — the mutex is
+    non-recursive, so the old libsmbc_close() call would deadlock.
+
+Trade-off: concurrent streams serialize their SMB I/O. Steady-state
+single-stream playback pays one uncontended lock/unlock per read —
+noise next to the SMB network round-trip. If the server stops
+responding, one stuck read now also blocks other streams until the
+per-URL timeout fires; acceptable for a player, and strictly better
+than the crash.
+
+This is stacked on top of 0004-libsmbclient-share-process-wide-ctx.patch.
+
+--- a/libavformat/libsmbclient.c
++++ b/libavformat/libsmbclient.c
+@@ -218,7 +218,18 @@ static int64_t libsmbc_seek(URLContext *h, int64_t pos, int whence)
+             return libsmbc->filesize;
+     }
+ 
+-    if ((newpos = smbc_lseek(libsmbc->fd, pos, whence)) < 0) {
++    /* MPVKit patch: since 0004 every URLContext shares one process-wide
++     * SMBCCTX, so two streams on the same server+share+user share one
++     * cli connection. Samba's fd-based I/O (smbc_lseek/read/write) has
++     * no internal locking; two threads issuing requests on the same
++     * connection interleave SMB2 requests and corrupt the thread-local
++     * talloc_stackframe bookkeeping ("Freed frame smbXcli_base.c:...,
++     * expected libsmb_file.c:..."). Serialize all protocol I/O under
++     * the same mutex as open/close. */
++    pthread_mutex_lock(&libsmbc_ctx_mutex);
++    newpos = smbc_lseek(libsmbc->fd, pos, whence);
++    pthread_mutex_unlock(&libsmbc_ctx_mutex);
++    if (newpos < 0) {
+         int err = errno;
+         av_log(h, AV_LOG_ERROR, "Error during seeking: %s\n", strerror(err));
+         return AVERROR(err);
+@@ -232,7 +243,11 @@ static int libsmbc_read(URLContext *h, unsigned char *buf, int size)
+     LIBSMBContext *libsmbc = h->priv_data;
+     int bytes_read;
+ 
+-    if ((bytes_read = smbc_read(libsmbc->fd, buf, size)) < 0) {
++    /* MPVKit patch: see libsmbc_seek — shared-ctx I/O must be serialized. */
++    pthread_mutex_lock(&libsmbc_ctx_mutex);
++    bytes_read = smbc_read(libsmbc->fd, buf, size);
++    pthread_mutex_unlock(&libsmbc_ctx_mutex);
++    if (bytes_read < 0) {
+         int ret = AVERROR(errno);
+         av_log(h, AV_LOG_ERROR, "Read error: %s\n", strerror(errno));
+         return ret;
+@@ -246,7 +261,11 @@ static int libsmbc_write(URLContext *h, const unsigned char *buf, int size)
+     LIBSMBContext *libsmbc = h->priv_data;
+     int bytes_written;
+ 
+-    if ((bytes_written = smbc_write(libsmbc->fd, buf, size)) < 0) {
++    /* MPVKit patch: see libsmbc_seek — shared-ctx I/O must be serialized. */
++    pthread_mutex_lock(&libsmbc_ctx_mutex);
++    bytes_written = smbc_write(libsmbc->fd, buf, size);
++    pthread_mutex_unlock(&libsmbc_ctx_mutex);
++    if (bytes_written < 0) {
+         int ret = AVERROR(errno);
+         av_log(h, AV_LOG_ERROR, "Write error: %s\n", strerror(errno));
+         return ret;
+@@ -295,10 +314,15 @@ static int libsmbc_read_dir(URLContext *h, AVIODirEntry **next)
+     if (!entry)
+         return AVERROR(ENOMEM);
+ 
++    /* MPVKit patch: see libsmbc_seek — shared-ctx I/O must be serialized.
++     * The lock also covers av_strdup(dirent->name): dirent points into
++     * Samba-internal storage owned by the shared ctx. */
++    pthread_mutex_lock(&libsmbc_ctx_mutex);
+     do {
+         skip_entry = 0;
+         dirent = smbc_readdir(libsmbc->dh);
+         if (!dirent) {
++            pthread_mutex_unlock(&libsmbc_ctx_mutex);
+             av_freep(next);
+             return 0;
+         }
+@@ -333,6 +357,7 @@ static int libsmbc_read_dir(URLContext *h, AVIODirEntry **next)
+ 
+     entry->name = av_strdup(dirent->name);
+     if (!entry->name) {
++        pthread_mutex_unlock(&libsmbc_ctx_mutex);
+         av_freep(next);
+         return AVERROR(ENOMEM);
+     }
+@@ -351,6 +376,7 @@ static int libsmbc_read_dir(URLContext *h, AVIODirEntry **next)
+         }
+         av_free(url);
+     }
++    pthread_mutex_unlock(&libsmbc_ctx_mutex);
+ 
+     return 0;
+ }
+@@ -358,11 +384,16 @@ static int libsmbc_read_dir(URLContext *h, AVIODirEntry **next)
+ static int libsmbc_close_dir(URLContext *h)
+ {
+     LIBSMBContext *libsmbc = h->priv_data;
++    /* MPVKit patch: see libsmbc_seek — shared-ctx I/O must be serialized.
++     * Use the _locked close inside one critical section; the mutex is
++     * non-recursive, so calling libsmbc_close() here would deadlock. */
++    pthread_mutex_lock(&libsmbc_ctx_mutex);
+     if (libsmbc->dh >= 0) {
+         smbc_closedir(libsmbc->dh);
+         libsmbc->dh = -1;
+     }
+-    libsmbc_close(h);
++    libsmbc_close_locked(h);
++    pthread_mutex_unlock(&libsmbc_ctx_mutex);
+     return 0;
+ }
+ 
