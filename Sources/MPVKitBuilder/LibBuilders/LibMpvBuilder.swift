@@ -167,11 +167,14 @@ extension LibMpvBuilder {
         // 开关按依赖是否真正产出来 gate，避免依赖缺失时 meson 配置阶段硬失败。
         let hasVulkan = dependencyIsBuilt(.vulkan, platform: platform, arch: arch)
         let hasPlacebo = dependencyIsBuilt(.libplacebo, platform: platform, arch: arch)
-        // iOS/tvOS Vulkan(MoltenVK) 窗口 context（patch 0003 新增）。
-        // 仅在 vulkan 真正产出且非 macOS 时开启：mpv 侧 meson require
-        // (darwin && vulkan && !cocoa)，若强行 enabled 但条件不满足会硬失败。
-        // macOS 走原生 vo（cocoa/swift 全关时无 vulkan 窗口 context），故此处 disabled。
-        let hasIosVulkan = hasVulkan && platform != .macos
+        // Apple Vulkan(MoltenVK) 窗口 context（patch 0003 新增，wid=CAMetalLayer）。
+        // mpv 侧 meson require (darwin && vulkan && !cocoa)：本 builder 所有平台
+        // （含 macOS）都是 cocoa=disabled 的 headless 构建，条件恒满足。
+        // macOS 必须同样开启：cocoa/swift 全关时 context_mac.m 不编入，
+        // 若再关掉 ios-vulkan，vo=gpu-next+vulkan 无任何窗口 context 可 probe，
+        // 表现为「有声音无画面」。context_ios.m 仅依赖 QuartzCore + VK_EXT_metal_surface，
+        // 不含 UIKit，macOS 下同样可编译可运行。
+        let hasIosVulkan = hasVulkan
         // ios-gl 依赖 EAGL/OpenGLES：仅真实提供 GLES 的 iOS/tvOS 系平台可启用。
         // macOS/maccatalyst 用 macOS SDK 无 OpenGLES 头；visionOS 把 EAGL/CVOpenGLES* 标 unavailable。
         // 用穷举 switch 而非默认分支，确保未来新增平台必须显式表态。
