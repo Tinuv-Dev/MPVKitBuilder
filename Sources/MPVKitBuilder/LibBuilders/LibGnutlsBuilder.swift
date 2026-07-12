@@ -87,7 +87,10 @@ final class LibGnutlsBuilder: AutoconfBuilder {
             "--without-p11-kit",
             "--without-zlib",
             "--without-zstd",
-            "--enable-hardware-acceleration",
+            // gnutls 与 OpenSSL 携带同源 ARMv8 加速汇编(aes_v8_*/gcm_*_v8/sha*_block_data_order),
+            // app 同时链接两库时 macOS 实测 duplicate symbol(CastFlow-macOS 2026-07-12)。
+            // macOS 关硬件加速,同名实现由 Libcrypto 提供;iOS/tvOS 维持现状避免 TLS 性能回退。
+            platform == .macos ? "--disable-hardware-acceleration" : "--enable-hardware-acceleration",
             "--disable-openssl-compatibility",
             "--disable-code-coverage",
             "--disable-doc",

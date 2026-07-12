@@ -92,6 +92,12 @@ extension XCFrameworkAssembler {
         try copyHeadersIfNeeded(builder: builder, framework: framework, platform: platform, to: frameworkDir)
         try writeModuleMap(builder: builder, framework: framework, to: frameworkDir)
         try writeInfoPlist(framework: framework, platform: platform, to: frameworkDir)
+
+        // macOS 不用 shallow bundle:Xcode 嵌入校验要求 Versions/Current 结构,
+        // 否则 app 打包报 "expected Versions/Current/Resources/Info.plist"。
+        if platform == .macos {
+            try restructureAsVersionedBundle(frameworkDir: frameworkDir, framework: framework)
+        }
         return frameworkDir
     }
 
@@ -174,6 +180,47 @@ extension XCFrameworkAssembler {
         </plist>
         """
         try content.write(to: frameworkDir.appendingPathComponent("Info.plist"), atomically: true, encoding: .utf8)
+    }
+}
+
+// MARK: - macOS versioned bundle
+
+extension XCFrameworkAssembler {
+    /// 把 shallow framework 重排为 macOS 标准 versioned bundle:
+    /// Versions/A/{binary,Headers,Modules,Resources/Info.plist} + 根部 symlink。
+    func restructureAsVersionedBundle(frameworkDir: URL, framework: String) throws {
+        let fm = FileManager.default
+        let versionA = frameworkDir.appendingPathComponent("Versions/A")
+        try fm.createDirectory(at: versionA.appendingPathComponent("Resources"), withIntermediateDirectories: true)
+
+        try fm.moveItem(
+            at: frameworkDir.appendingPathComponent(framework),
+            to: versionA.appendingPathComponent(framework)
+        )
+        for sub in ["Headers", "Modules"] {
+            let source = frameworkDir.appendingPathComponent(sub)
+            if fm.fileExists(atPath: source.path) {
+                try fm.moveItem(at: source, to: versionA.appendingPathComponent(sub))
+            }
+        }
+        try fm.moveItem(
+            at: frameworkDir.appendingPathComponent("Info.plist"),
+            to: versionA.appendingPathComponent("Resources/Info.plist")
+        )
+
+        // symlink 目标必须是相对路径,走字符串 API(URL 版会解析成绝对路径)
+        try fm.createSymbolicLink(
+            atPath: frameworkDir.appendingPathComponent("Versions/Current").path,
+            withDestinationPath: "A"
+        )
+        for name in [framework, "Headers", "Modules", "Resources"]
+            where fm.fileExists(atPath: versionA.appendingPathComponent(name).path)
+        {
+            try fm.createSymbolicLink(
+                atPath: frameworkDir.appendingPathComponent(name).path,
+                withDestinationPath: "Versions/Current/\(name)"
+            )
+        }
     }
 }
 

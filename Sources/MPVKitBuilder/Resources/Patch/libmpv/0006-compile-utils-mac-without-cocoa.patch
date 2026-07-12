@@ -1,0 +1,18 @@
+diff --git a/meson.build b/meson.build
+index fb10be5..361166b 100644
+--- a/meson.build
++++ b/meson.build
+@@ -838,6 +838,13 @@ if features['audiounit'] or features['coreaudio'] or features['avfoundation']
+                      'audio/out/ao_coreaudio_utils.c')
+ endif
+ 
++# MPVKitBuilder: coreaudio/audiounit AOs call cfstr_* helpers defined in
++# osdep/utils-mac.c, which upstream only compiles under the cocoa feature.
++# Headless (cocoa-disabled) builds must compile it too or linking fails.
++if (features['audiounit'] or features['coreaudio'] or features['avfoundation']) and not features['cocoa']
++    sources += files('osdep/utils-mac.c')
++endif
++
+ if features['avfoundation']
+     sources += files('audio/out/ao_coreaudio_properties.c')
+ endif
