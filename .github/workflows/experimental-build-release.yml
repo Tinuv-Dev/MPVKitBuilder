@@ -198,6 +198,41 @@ jobs:
           cpanm Parse::Yapp
           python3 -m pip install jinja2 --break-system-packages
 
+      - name: Install Rust build tools (libdovi)
+        run: |
+          set -euo pipefail
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          fi
+
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+          case "${{ matrix.platform }}" in
+            macos)        TARGETS="aarch64-apple-darwin x86_64-apple-darwin" ;;
+            ios)          TARGETS="aarch64-apple-ios" ;;
+            isimulator)   TARGETS="aarch64-apple-ios-sim x86_64-apple-ios" ;;
+            tvos)         TARGETS="aarch64-apple-tvos" ;;
+            tvsimulator)  TARGETS="aarch64-apple-tvos-sim" ;;
+            xros)         TARGETS="aarch64-apple-visionos" ;;
+            xrsimulator)  TARGETS="aarch64-apple-visionos-sim" ;;
+            maccatalyst)  TARGETS="aarch64-apple-ios-macabi x86_64-apple-ios-macabi" ;;
+            *)            TARGETS="" ;;
+          esac
+          if [ -n "$TARGETS" ]; then
+            rustup target add $TARGETS
+          fi
+
+          if ! command -v cargo-cinstall >/dev/null 2>&1; then
+            cargo install cargo-c --locked
+          fi
+
+          rustc -vV
+          cargo cinstall --version
+
       - name: Download prebuilt vulkan
         env:
           REPO: ${{ github.repository }}
@@ -292,7 +327,6 @@ jobs:
             split-platform
             clean-after-lib
             verbose
-            skip=libdovi
             prebuilt-vulkan=$PREBUILT_VULKAN
           )
           if [ "${{ inputs.enable_gpl }}" = "true" ]; then

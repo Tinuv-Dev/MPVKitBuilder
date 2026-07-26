@@ -252,6 +252,12 @@ extension PackageManifestGenerator {
             appendDependencyName(name, to: &dependencyNames, seen: &seen)
         }
 
+        // Standalone consumer libraries: not in the libmpv link closure, but exposed
+        // through the MPVKit product so hosts can `import` them directly (libdovi RPU C API).
+        for name in frameworkTargetNames(for: [.libdovi], available: available) where !ffmpegCovered.contains(name) {
+            appendDependencyName(name, to: &dependencyNames, seen: &seen)
+        }
+
         return dependencyNames.compactMap { dependencyExpression(name: $0, manifest: manifest) }
     }
 
