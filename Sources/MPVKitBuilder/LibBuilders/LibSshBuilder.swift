@@ -35,4 +35,20 @@ final class LibSshBuilder: CMakeBuilder {
             "-DWITH_NACL=OFF",
         ]
     }
+
+    // 上游 libssh.pc 模板只有 `Libs: -L${libdir} -lssh`，没有任何 private 字段——
+    // 那是按动态库写的（.dylib 自带 OpenSSL 依赖记录）。我们出的是静态库，
+    // pkg-config --static 因此拿不到 -lcrypto，FFmpeg configure 的链接测试会挂在
+    // OSSL_PARAM_* / PEM_* / RAND_* 未定义上，最终报成 "libssh >= 0.6.0 not found"。
+    // 用 Requires.private 而不是 Libs.private：让 pkg-config 递归解析 libcrypto.pc，
+    // 连 -L 路径一起带出来，指向我们自己编的 openssl 而不是系统的。
+    override func postBuild(platform: PlatformType, arch: ArchType) throws {
+        let pc = ctx.thinDir(lib, platform: platform, arch: arch)
+            .appendingPathComponent("lib/pkgconfig/libssh.pc")
+        guard var content = try? String(contentsOf: pc, encoding: .utf8),
+              !content.contains("Requires.private") else { return }
+        if !content.hasSuffix("\n") { content += "\n" }
+        content += "Requires.private: libcrypto\n"
+        try? content.write(to: pc, atomically: true, encoding: .utf8)
+    }
 }
