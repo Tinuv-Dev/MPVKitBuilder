@@ -231,9 +231,9 @@ extension LibFFmpegBuilder {
             guard ffmpegCanUse(dep, platform: platform) else { continue }
             args.append("--enable-\(dep.rawValue)")
             switch dep {
-            // 这几个外部库各自提供一个同名 protocol（srt / libsmbclient / libssh / libnfs），
+            // 这几个外部库各自提供一个同名 protocol（srt / libsmbclient / libssh），
             // --enable-libxxx 只是打开库，protocol 还要单独开。
-            case .libsrt, .libsmbclient, .libssh, .libnfs:
+            case .libsrt, .libsmbclient, .libssh:
                 args.append("--enable-protocol=\(dep.rawValue)")
             case .libdav1d:
                 args.append("--enable-decoder=libdav1d")
@@ -252,6 +252,13 @@ extension LibFFmpegBuilder {
     }
 
     func ffmpegCanUse(_ dep: Library, platform: PlatformType) -> Bool {
+        // FFmpeg 上游没有 libnfs 这个外部库，传 --enable-libnfs 会让 configure 直接
+        // 报 Unknown option 并退出（configure 遇到第一个未知选项就整体失败）。
+        // libnfs 仍然构建并单独产出 xcframework：NFS 播放走 mpv 的 stream_cb，
+        // 由上层用 libnfs C API 接管 nfs://，不经 FFmpeg 的 protocol 层。
+        if dep == .libnfs {
+            return false
+        }
         // Mac Catalyst keeps VideoToolbox hardware decode, but FFmpeg's libplacebo
         // filter is not useful without the Vulkan/MoltenVK backend and fails CI
         // pkg-config link checks under Xcode 16.2.

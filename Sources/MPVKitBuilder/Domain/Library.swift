@@ -147,7 +147,7 @@ extension Library {
     /// Whether this library is enabled by ffmpeg when present (used to auto-emit `--enable-libxxx`).
     var isFFmpegDependentLibrary: Bool {
         switch self {
-        case .openssl, .libass, .libsmbclient, .libssh, .libnfs, .vulkan, .libshaderc,
+        case .openssl, .libass, .libsmbclient, .libssh, .vulkan, .libshaderc,
              .lcms2, .libplacebo, .libdav1d, .libuavs3d, .libbluray,
              .libsrt, .libzvbi:
             return true

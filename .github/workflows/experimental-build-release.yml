@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       vulkan_run_id:
-        description: 'Run ID of a successful Prebuild Vulkan run. Artifact ID or artifact URL is also accepted.'
+        description: 'Run ID of a run that produced a vulkan-prebuilt artifact (Prebuild Vulkan, or a One-Shot Release whose vulkan job succeeded). Artifact ID or artifact URL is also accepted.'
         type: string
         required: true
       tag:
@@ -14,7 +14,7 @@ on:
       enable_gpl:
         description: 'Enable GPL (includes libsmbclient)'
         type: boolean
-        default: false
+        default: true
       extra_ffmpeg:
         description: 'Extra FFmpeg configure args'
         type: string
@@ -228,7 +228,7 @@ jobs:
               --jq '.artifacts[].name' 2>/dev/null \
               | while IFS= read -r name; do
                   case "$name" in
-                    vulkan-prebuilt-*)
+                    vulkan-prebuilt|vulkan-prebuilt-*)
                       printf '%s\n' "$name"
                       break
                       ;;
@@ -246,7 +246,7 @@ jobs:
               RESOLVED_RUN_ID="${ARTIFACT_INFO%%$'\t'*}"
               RESOLVED_ARTIFACT="${ARTIFACT_INFO#*$'\t'}"
               case "$RESOLVED_ARTIFACT" in
-                vulkan-prebuilt-*)
+                vulkan-prebuilt|vulkan-prebuilt-*)
                   RUN_ID="$RESOLVED_RUN_ID"
                   ARTIFACT="$RESOLVED_ARTIFACT"
                   echo "resolved artifact $ARTIFACT_ID to run $RUN_ID"
@@ -255,8 +255,8 @@ jobs:
             fi
           fi
           if [ -z "$ARTIFACT" ]; then
-            echo "no vulkan-prebuilt-* artifact found for input $VULKAN_INPUT"
-            echo "Use the Prebuild Vulkan run ID from /actions/runs/<run_id>, or paste the vulkan-prebuilt artifact URL."
+            echo "no vulkan-prebuilt artifact found for input $VULKAN_INPUT"
+            echo "Use a run ID from /actions/runs/<run_id> (Prebuild Vulkan, or a One-Shot Release run whose vulkan job succeeded), or paste the vulkan-prebuilt artifact URL."
             exit 1
           fi
           echo "downloading $ARTIFACT from run $RUN_ID"
@@ -380,7 +380,7 @@ jobs:
               --jq '.artifacts[].name' 2>/dev/null \
               | while IFS= read -r name; do
                   case "$name" in
-                    vulkan-prebuilt-*)
+                    vulkan-prebuilt|vulkan-prebuilt-*)
                       printf '%s\n' "$name"
                       break
                       ;;
@@ -400,7 +400,7 @@ jobs:
               RESOLVED_RUN_ID="${ARTIFACT_INFO%%$'\t'*}"
               RESOLVED_ARTIFACT="${ARTIFACT_INFO#*$'\t'}"
               case "$RESOLVED_ARTIFACT" in
-                vulkan-prebuilt-*)
+                vulkan-prebuilt|vulkan-prebuilt-*)
                   RUN_ID="$RESOLVED_RUN_ID"
                   ARTIFACT="$RESOLVED_ARTIFACT"
                   echo "resolved artifact $ARTIFACT_ID to run $RUN_ID"
@@ -410,8 +410,8 @@ jobs:
           fi
 
           if [ -z "$ARTIFACT" ]; then
-            echo "no vulkan-prebuilt-* artifact found for input $VULKAN_INPUT"
-            echo "Use the Prebuild Vulkan run ID from /actions/runs/<run_id>, or paste the vulkan-prebuilt artifact URL."
+            echo "no vulkan-prebuilt artifact found for input $VULKAN_INPUT"
+            echo "Use a run ID from /actions/runs/<run_id> (Prebuild Vulkan, or a One-Shot Release run whose vulkan job succeeded), or paste the vulkan-prebuilt artifact URL."
             exit 1
           fi
           gh run download "$RUN_ID" \

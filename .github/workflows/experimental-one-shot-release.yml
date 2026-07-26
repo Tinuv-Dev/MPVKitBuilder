@@ -10,7 +10,7 @@ on:
       enable_gpl:
         description: Enable GPL (includes libsmbclient)
         type: boolean
-        default: false
+        default: true
       extra_ffmpeg:
         description: Extra FFmpeg configure args
         type: string
