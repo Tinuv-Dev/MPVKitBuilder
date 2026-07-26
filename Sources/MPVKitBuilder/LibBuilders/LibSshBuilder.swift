@@ -25,6 +25,10 @@ final class LibSshBuilder: CMakeBuilder {
             "-DWITH_PCAP=OFF",
             // iOS / tvOS 上没有 GSSAPI，开着会在 configure 阶段找不到 krb5。
             "-DWITH_GSSAPI=OFF",
+            // WITH_EXEC 让 config.c 用 fork/execv 实现 Match exec、ProxyCommand 和
+            // ProxyJump，而 tvOS SDK 把这两个符号标成 unavailable，直接编译报错。
+            // 播放器只是读 sftp:// 文件，用不到这些；沙盒里也起不了外部进程。
+            "-DWITH_EXEC=OFF",
             // 传输压缩对本地网络播放没收益，关掉可以少引一个 zlib 依赖。
             "-DWITH_ZLIB=OFF",
             "-DWITH_DEBUG_CRYPTO=OFF",
