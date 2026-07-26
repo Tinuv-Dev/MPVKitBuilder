@@ -16,6 +16,8 @@ enum LibraryDependency {
         .nettle:       [.gmp],
         .libgnutls:    [.gmp, .nettle],
         .libsmbclient: [.openssl, .libgnutls],
+        .libssh:       [.openssl],
+        .libnfs:       [],
         .vulkan:       [],
         .libshaderc:   [],
         .lcms2:        [],
@@ -24,7 +26,7 @@ enum LibraryDependency {
         .libuavs3d:    [],
         .libdovi:      [],
         .libluajit:    [],
-        .ffmpeg:       [.openssl, .libass, .libsmbclient, .vulkan, .libshaderc, .lcms2,
+        .ffmpeg:       [.openssl, .libass, .libsmbclient, .libssh, .libnfs, .vulkan, .libshaderc, .lcms2,
                         .libplacebo, .libdav1d, .libuavs3d, .libbluray, .libsrt, .libzvbi],
         .libmpv:       [.ffmpeg, .libass, .libplacebo, .libuchardet, .libluajit, .libbluray],
     ]

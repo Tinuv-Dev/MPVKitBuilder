@@ -231,7 +231,9 @@ extension LibFFmpegBuilder {
             guard ffmpegCanUse(dep, platform: platform) else { continue }
             args.append("--enable-\(dep.rawValue)")
             switch dep {
-            case .libsrt, .libsmbclient:
+            // 这几个外部库各自提供一个同名 protocol（srt / libsmbclient / libssh / libnfs），
+            // --enable-libxxx 只是打开库，protocol 还要单独开。
+            case .libsrt, .libsmbclient, .libssh, .libnfs:
                 args.append("--enable-protocol=\(dep.rawValue)")
             case .libdav1d:
                 args.append("--enable-decoder=libdav1d")

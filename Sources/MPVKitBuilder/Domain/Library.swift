@@ -15,6 +15,8 @@ enum Library: String, CaseIterable, Codable {
     case nettle
     case libgnutls
     case libsmbclient
+    case libssh
+    case libnfs
     case vulkan
     case libshaderc
     case lcms2
@@ -46,6 +48,8 @@ extension Library {
         case .nettle: return "nettle_3.9.1_release_20230601"
         case .libgnutls: return "3.8.3"
         case .libsmbclient: return "samba-4.15.13"
+        case .libssh: return "libssh-0.11.5"
+        case .libnfs: return "libnfs-6.0.2"
         case .vulkan: return "v1.4.1"
         case .libshaderc: return "v2024.4"
         case .lcms2: return "lcms2.17"
@@ -77,6 +81,9 @@ extension Library {
         case .nettle: return "https://github.com/gnutls/nettle"
         case .libgnutls: return "https://github.com/gnutls/gnutls"
         case .libsmbclient: return "https://github.com/samba-team/samba"
+        // GitHub 上的 libssh/libssh-mirror 停在 0.8.4，只有 GitLab 官方镜像跟到 0.11.x。
+        case .libssh: return "https://gitlab.com/libssh/libssh-mirror.git"
+        case .libnfs: return "https://github.com/sahlberg/libnfs"
         case .vulkan: return "https://github.com/KhronosGroup/MoltenVK"
         case .libshaderc: return "https://github.com/google/shaderc"
         case .lcms2: return "https://github.com/mm2/Little-CMS"
@@ -140,7 +147,7 @@ extension Library {
     /// Whether this library is enabled by ffmpeg when present (used to auto-emit `--enable-libxxx`).
     var isFFmpegDependentLibrary: Bool {
         switch self {
-        case .openssl, .libass, .libsmbclient, .vulkan, .libshaderc,
+        case .openssl, .libass, .libsmbclient, .libssh, .libnfs, .vulkan, .libshaderc,
              .lcms2, .libplacebo, .libdav1d, .libuavs3d, .libbluray,
              .libsrt, .libzvbi:
             return true
@@ -165,6 +172,8 @@ extension Library {
         case .nettle: return LibNettleBuilder(context: context)
         case .libgnutls: return LibGnutlsBuilder(context: context)
         case .libsmbclient: return LibSmbclientBuilder(context: context)
+        case .libssh: return LibSshBuilder(context: context)
+        case .libnfs: return LibNfsBuilder(context: context)
         case .vulkan: return LibVulkanBuilder(context: context)
         case .libshaderc: return LibShadercBuilder(context: context)
         case .lcms2: return LibLcms2Builder(context: context)
